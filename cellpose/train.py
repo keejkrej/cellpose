@@ -314,7 +314,8 @@ def train_seg(net, train_data=None, train_labels=None, train_files=None,
               n_epochs=100, weight_decay=0.1, normalize=True, compute_flows=False,
               save_path=None, save_every=100, save_each=False, nimg_per_epoch=None,
               nimg_test_per_epoch=None, rescale=False, scale_range=None, bsize=256,
-              min_train_masks=5, model_name=None, class_weights=None):
+              min_train_masks=5, model_name=None, class_weights=None,
+              save_to_models_dir=True):
     """
     Train the network with images for segmentation.
 
@@ -346,6 +347,8 @@ def train_seg(net, train_data=None, train_labels=None, train_files=None,
         rescale (bool, optional): Boolean - whether or not to rescale images during training. Defaults to False.
         min_train_masks (int, optional): Integer - minimum number of masks an image must have to use in the training set. Defaults to 5.
         model_name (str, optional): String - name of the network. Defaults to None.
+        save_to_models_dir (bool, optional): Save inside a "models" subfolder under
+            save_path. Defaults to True.
 
     Returns:
         tuple: A tuple containing the path to the saved model weights, training losses, and test losses.
@@ -424,8 +427,9 @@ def train_seg(net, train_data=None, train_labels=None, train_files=None,
     t0 = time.time()
     model_name = f"cellpose_{t0}" if model_name is None else model_name
     save_path = Path.cwd() if save_path is None else Path(save_path)
-    filename = save_path / "models" / model_name
-    (save_path / "models").mkdir(exist_ok=True)
+    output_dir = save_path / "models" if save_to_models_dir else save_path
+    filename = output_dir / model_name
+    output_dir.mkdir(parents=True, exist_ok=True)
 
     train_logger.info(f">>> saving model to {filename}")
 

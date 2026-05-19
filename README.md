@@ -115,7 +115,7 @@ You can also try to install cellpose and the GUI dependencies from your base env
 python -m pip install cellpose[gui]
 ~~~~
 
-If you have **issues** with installation, see the [docs](https://cellpose.readthedocs.io/en/latest/installation.html) for more details. You can also use the cellpose environment file included in the repository and create a cellpose environment with `conda env create -f environment.yml` which may solve certain dependency issues.
+If you have **issues** with installation, see the [docs](https://cellpose.readthedocs.io/en/latest/installation.html) for more details. For a reproducible install from this repo, use [uv](https://docs.astral.sh/uv/): `uv sync` then `uv run cellpose`.
 
 If these suggestions fail, open an issue.
 

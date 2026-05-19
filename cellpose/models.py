@@ -2,14 +2,14 @@
 Copyright © 2025 Howard Hughes Medical Institute, Authored by Carsen Stringer, Michael Rariden and Marius Pachitariu.
 """
 
-import os, time
+import os
+import time
 from pathlib import Path
 import numpy as np
 from tqdm import trange
 import torch
 from scipy.ndimage import gaussian_filter
 import gc
-import cv2
 
 import logging
 
@@ -212,6 +212,12 @@ class CellposeModel():
             styles (list of 1D arrays of length 256 or single 1D array): Style vector containing only zeros. Retained for compaibility with CP3. 
             
         """
+
+        if rescale is not None:
+            models_logger.warning("rescaling deprecated in v4.0.1+") 
+        if channels is not None:
+            models_logger.warning("channels deprecated in v4.0.1+. If data contain more than 3 channels, only the first 3 channels will be used")
+
         if isinstance(x, list) or x.squeeze().ndim == 5:
             self.timing = []
             masks, styles, flows = [], [], []

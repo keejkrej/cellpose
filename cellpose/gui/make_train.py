@@ -1,4 +1,5 @@
-import os, argparse
+import os
+import argparse
 import numpy as np
 from cellpose import io, transforms
 

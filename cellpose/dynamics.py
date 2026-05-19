@@ -2,8 +2,6 @@
 Copyright © 2025 Howard Hughes Medical Institute, Authored by Carsen Stringer , Michael Rariden and Marius Pachitariu.
 """
 import os
-import cv2
-from cellpose import transforms
 from scipy.ndimage import find_objects, center_of_mass, mean
 import torch
 import numpy as np
@@ -17,10 +15,10 @@ dynamics_logger = logging.getLogger(__name__)
 
 from . import utils
 
-import torch
 import torch.nn.functional as F
 
-def _extend_centers_gpu(neighbors, meds, isneighbor, shape, n_iter=200, device=torch.device("cpu")):
+def _extend_centers_gpu(neighbors, meds, isneighbor, shape, n_iter=200, 
+                        device=torch.device("cpu")):
     """Runs diffusion on GPU to generate flows for training images or quality control.
 
     Args:
@@ -29,51 +27,41 @@ def _extend_centers_gpu(neighbors, meds, isneighbor, shape, n_iter=200, device=t
         isneighbor (torch.Tensor): Valid neighbor boolean 9 x pixels.
         shape (tuple): Shape of the tensor.
         n_iter (int, optional): Number of iterations. Defaults to 200.
-        device (torch.device, optional): Device to run on. Defaults to torch.device("cpu").
+        device (torch.device, optional): Device to run the computation on. Defaults to torch.device("cpu").
 
     Returns:
-        np.ndarray: Generated flows.
-    """
-    
-    dtype = torch.float32 if torch.prod(torch.tensor(shape)) > 4e7 or device.type == "mps" else torch.float64
-    T_flat = torch.zeros(np.prod(shape), dtype=dtype, device=device)
-            
-    ndim = len(shape)
-    Ly, Lx = shape[-2:]
-    # speed up with flattened inds
-    if ndim == 2:
-        Ly, Lx = shape
-        flat_neighbors = (neighbors[0] * Lx + neighbors[1]).long()
-        flat_meds = (meds[:, 0] * Lx + meds[:, 1]).long()         
-    else:
-        flat_neighbors = (neighbors[0] * (Ly * Lx) + neighbors[1] * Lx + neighbors[2]).long()
-        flat_meds = (meds[:, 0] * (Ly * Lx) + meds[:, 1] * Lx + meds[:, 2]).long() 
-        
-    flat_center = flat_neighbors[0]
-    
-    nneigh = flat_neighbors.shape[0]
-    for i in range(n_iter):
-        T_flat[flat_meds] += 1
-        Tneigh = T_flat[flat_neighbors]
-        T_flat[flat_center] = (Tneigh * isneighbor).sum(dim=0) / nneigh
-    del flat_meds, neighbors, meds, isneighbor, Tneigh
+        torch.Tensor: Generated flows.
 
-    if ndim == 2:
-        grads = T_flat[flat_neighbors[[2, 1, 4, 3]]]
+    """
+    if torch.prod(torch.tensor(shape)) > 4e7 or device.type == "mps":
+        T = torch.zeros(shape, dtype=torch.float, device=device)
+    else:
+        T = torch.zeros(shape, dtype=torch.double, device=device)
+
+    for i in range(n_iter):
+        T[tuple(meds.T)] += 1
+        Tneigh = T[tuple(neighbors)]
+        Tneigh *= isneighbor
+        T[tuple(neighbors[:, 0])] = Tneigh.mean(axis=0)
+    del meds, isneighbor, Tneigh
+
+    if T.ndim == 2:
+        grads = T[neighbors[0, [2, 1, 4, 3]], neighbors[1, [2, 1, 4, 3]]]
+        del neighbors
         dy = grads[0] - grads[1]
         dx = grads[2] - grads[3]
         del grads
-        mu = np.stack((dy.cpu().numpy(), dx.cpu().numpy()), axis=0)
+        mu_torch = np.stack((dy.cpu().squeeze(0), dx.cpu().squeeze(0)), axis=-2)
     else:
-        grads = T_flat[flat_neighbors[1:]]          
+        grads = T[tuple(neighbors[:, 1:])]
+        del neighbors
         dz = grads[0] - grads[1]
         dy = grads[2] - grads[3]
         dx = grads[4] - grads[5]
         del grads
-        mu = np.stack((dz.cpu().numpy(), dy.cpu().numpy(), dx.cpu().numpy()), axis=0)
-
-    return mu
-
+        mu_torch = np.stack(
+            (dz.cpu().squeeze(0), dy.cpu().squeeze(0), dx.cpu().squeeze(0)), axis=-2)
+    return mu_torch
 
 def center_of_mass(mask):
     yi, xi = np.nonzero(mask)
@@ -86,7 +74,6 @@ def center_of_mass(mask):
         xmean = xi[imin]
     
     return ymean, xmean
-
 
 def get_centers(masks, slices):
     centers = [center_of_mass(masks[slices[i]]==(i+1)) for i in range(len(slices))]
@@ -115,7 +102,7 @@ def masks_to_flows_gpu(masks, device=torch.device("cpu"), niter=None):
         meds_p are cell centers.
     """
     if device is None:
-        device = torch.device('cuda') if torch.cuda.is_available() else torch.device('mps') if torch.backends.mps.is_available() else torch.device('cpu')   
+        device = torch.device('cuda') if torch.cuda.is_available() else torch.device('mps') if torch.backends.mps.is_available() else None
 
     if masks.max() > 0:
         Ly0, Lx0 = masks.shape
@@ -130,7 +117,6 @@ def masks_to_flows_gpu(masks, device=torch.device("cpu"), niter=None):
         y = y.int()
         x = x.int()
         neighbors = torch.zeros((2, 9, y.shape[0]), dtype=torch.int, device=device)
-        
         yxi = [[0, -1, 1, 0, 0, -1, -1, 1, 1], [0, 0, 0, -1, 1, -1, 1, -1, 1]]
         for i in range(9):
             neighbors[0, i] = y + yxi[0][i]
@@ -150,7 +136,6 @@ def masks_to_flows_gpu(masks, device=torch.device("cpu"), niter=None):
         ### run diffusion
         n_iter = 2 * ext.max() if niter is None else niter
         mu = _extend_centers_gpu(neighbors, meds_p, isneighbor, shape, n_iter=n_iter,
-
                                 device=device)
         mu = mu.astype("float64")
 
@@ -163,16 +148,14 @@ def masks_to_flows_gpu(masks, device=torch.device("cpu"), niter=None):
     else:
         # no masks, return empty flows
         mu0 = np.zeros((2, masks.shape[0], masks.shape[1]))
-        slices = None
+    return mu0
 
-    return mu0, slices
-
-def masks_to_flows_gpu_3d(masks, device=torch.device('cpu'), niter=None):
+def masks_to_flows_gpu_3d(masks, device=None, niter=None):
     """Convert masks to flows using diffusion from center pixel.
 
     Args:
         masks (int, 2D or 3D array): Labelled masks. 0=NO masks; 1,2,...=mask labels.
-        device (torch.device, optional): The device to run the computation on. Defaults to torch.device('cpu').
+        device (torch.device, optional): The device to run the computation on. Defaults to None.
         niter (int, optional): Number of iterations for the diffusion process. Defaults to None.
 
     Returns:
@@ -180,7 +163,7 @@ def masks_to_flows_gpu_3d(masks, device=torch.device('cpu'), niter=None):
         
     """
     if device is None:
-        device = torch.device('cuda') if torch.cuda.is_available() else torch.device('mps') if torch.backends.mps.is_available() else torch.device('cpu')
+        device = torch.device('cuda') if torch.cuda.is_available() else torch.device('mps') if torch.backends.mps.is_available() else None
 
     Lz0, Ly0, Lx0 = masks.shape
     Lz, Ly, Lx = Lz0 + 2, Ly0 + 2, Lx0 + 2
@@ -199,7 +182,7 @@ def masks_to_flows_gpu_3d(masks, device=torch.device('cpu'), niter=None):
     # get mask centers
     slices = find_objects(masks)
 
-    centers = torch.zeros((masks.max(), 3), dtype=torch.int, device=device)
+    centers = np.zeros((masks.max(), 3), "int")
     for i, si in enumerate(slices):
         if si is not None:
             sz, sy, sx = si
@@ -219,7 +202,7 @@ def masks_to_flows_gpu_3d(masks, device=torch.device('cpu'), niter=None):
             centers[i, 2] = xmed + sx.start
 
     # get neighbor validator (not all neighbors are in same mask)
-    neighbor_masks = masks_padded[neighbors[0], neighbors[1], neighbors[2]]
+    neighbor_masks = masks_padded[tuple(neighbors)]
     isneighbor = neighbor_masks == neighbor_masks[0]
     ext = np.array(
         [[sz.stop - sz.start + 1, sy.stop - sy.start + 1, sx.stop - sx.start + 1]
@@ -272,7 +255,7 @@ def labels_to_flows(labels, files=None, device=None, redo_flows=False, niter=Non
         iterator = trange if nimg > 1 else range
         for n in iterator(nimg):
             labels[n][0] = fastremap.renumber(labels[n][0], in_place=True)[0]
-            vecn = masks_to_flows_gpu(labels[n][0].astype(int), device=device, niter=niter)[0]
+            vecn = masks_to_flows_gpu(labels[n][0].astype(int), device=device, niter=niter)
 
             # concatenate labels, distance transform, vector flows, heat (boundary and mask are computed in augmentations)
             flow = np.concatenate((labels[n], labels[n] > 0.5, vecn),
@@ -313,11 +296,13 @@ def flow_error(maski, dP_net, device=None):
         return
 
     # flows predicted from estimated masks
-    dP_masks, slices = masks_to_flows_gpu(maski, device=device)
-    
-    # assign flow error to each mask, as mean squared error between predicted flows and flows from masks
-    err = ((dP_masks - dP_net / 5.)**2).sum(axis=0)
-    flow_errors = np.array([err[slc[0], slc[1]][maski[slc[0], slc[1]] == (j+1)].mean() for j, slc in enumerate(slices)])
+    dP_masks = masks_to_flows_gpu(maski, device=device)
+    # difference between predicted flows vs mask flows
+    flow_errors = np.zeros(maski.max())
+    for i in range(dP_masks.shape[0]):
+        flow_errors += mean((dP_masks[i] - dP_net[i] / 5.)**2, maski,
+                            index=np.arange(1,
+                                            maski.max() + 1))
 
     return flow_errors, dP_masks
 
@@ -369,8 +354,7 @@ def steps_interp(dP, inds, niter, device=torch.device("cpu")):
     for t in range(niter):
         dPt = torch.nn.functional.grid_sample(im, pt, align_corners=False)
         for k in range(ndim):  #clamp the final pixel locations
-            pt[..., k] += dPt[:, k]
-            torch.clamp_(pt[..., k], -1., 1.)
+            pt[..., k] = torch.clamp(pt[..., k] + dPt[:, k], -1., 1.)
 
     #undo the normalization from before, reverse order of operations
     pt += 1 
@@ -457,10 +441,8 @@ def remove_bad_flow_masks(masks, flows, threshold=0.4, device=torch.device("cpu"
 
     merrors, _ = flow_error(masks, flows, device0)
     badi = 1 + (merrors > threshold).nonzero()[0]
-    fastremap.mask(masks, badi, in_place=True)
-    fastremap.renumber(masks, in_place=True)
+    masks[np.isin(masks, badi)] = 0
     return masks
-
 
 
 def max_pool1d(h, kernel_size=5, axis=1, out=None):
@@ -551,27 +533,16 @@ def get_masks_torch(pt, inds, shape0, rpad=20, max_size_fraction=0.4):
         dynamics_logger.warning("no seeds found in get_masks_torch - no masks found.")
         return np.zeros(shape0, dtype="uint16")
     
-    npts = h1[seeds1[:,0], seeds1[:,1]] if ndim == 2 else h1[seeds1[:,0], seeds1[:,1], seeds1[:,2]]
+    npts = h1[tuple(seeds1.T)]
     isort1 = npts.argsort()
     seeds1 = seeds1[isort1]
 
     n_seeds = len(seeds1)
-    # speed up with flattened inds
-    offset_t = torch.arange(-5, 6, device=seeds1.device)
-    inds_t = torch.meshgrid(ndim * [offset_t], indexing="ij")
-    if ndim == 2:
-        flat_inds = (inds_t[0] * shape[1] + inds_t[1]).flatten()
-        flat_inds = flat_inds + (seeds1[:,0] * shape[1] + seeds1[:,1])[:,None]
-    else:
-        flat_inds = (inds_t[0] * shape[1] * shape[2] + inds_t[1] * shape[2] + inds_t[2]).flatten()
-        flat_inds = flat_inds + (seeds1[:,0] * shape[1] * shape[2] + seeds1[:,1] * shape[2] + seeds1[:,2])[:,None]
-
-    h1 = h1.view(-1)
-    h_slc = h1[flat_inds]
-    h_slc = h_slc.reshape(n_seeds, *[11]*ndim)
-    
+    h_slc = torch.zeros((n_seeds, *[11]*ndim), device=seeds1.device)
+    for k in range(n_seeds):
+        slc = tuple([slice(seeds1[k][j]-5, seeds1[k][j]+6) for j in range(ndim)])
+        h_slc[k] = h1[slc]
     del h1
-
     seed_masks = torch.zeros((n_seeds, *[11]*ndim), device=seeds1.device)
     if ndim==2:
         seed_masks[:,5,5] = 1
@@ -583,22 +554,16 @@ def get_masks_torch(pt, inds, shape0, rpad=20, max_size_fraction=0.4):
         seed_masks = max_pool_nd(seed_masks, kernel_size=3)
         seed_masks *= h_slc > 2
     del h_slc 
+    seeds_new = [tuple((torch.nonzero(seed_masks[k]) + seeds1[k] - 5).T) 
+            for k in range(n_seeds)]
+    del seed_masks 
     
-
-    # speed up from issue #1435 from weiyusheng
     dtype = torch.int32 if n_seeds < 2**16 else torch.int64
-    M1 = torch.zeros(np.prod(shape), device=device, dtype=dtype)
-    ipix = torch.nonzero(seed_masks).to(dtype)
-    mask_idx = ipix[:, 0]
-    mask_pos = ipix[:, 1:] + seeds1[mask_idx] - 5
-    if ndim == 2:
-        flat_inds = mask_pos[:, 0] * shape[1] + mask_pos[:, 1]
-    else:
-        flat_inds = mask_pos[:, 0] * shape[1] * shape[2] + mask_pos[:, 1] * shape[2] + mask_pos[:, 2]
-    M1.scatter_reduce_(0, flat_inds, mask_idx + 1, reduce="amax", include_self=False)
-    M1 = M1.reshape(shape)
+    M1 = torch.zeros(shape, dtype=dtype, device=device)
+    for k in range(n_seeds):
+        M1[seeds_new[k]] = 1 + k
 
-    M1 = M1[pt[0], pt[1]] if ndim == 2 else M1[pt[0], pt[1], pt[2]]
+    M1 = M1[tuple(pt)]
     M1 = M1.cpu().numpy()
 
     dtype = "uint16" if n_seeds < 2**16 else "uint32"
@@ -648,22 +613,7 @@ def resize_and_compute_masks(dP, cellprob, niter=200, cellprob_threshold=0.0,
                             device=device)
 
     if resize is not None:
-        if len(resize) == 2:
-            mask = transforms.resize_image(mask, resize[0], resize[1], no_channels=True,
-                                           interpolation=cv2.INTER_NEAREST)
-        else:
-            Lz, Ly, Lx = resize
-            if mask.shape[0] != Lz or mask.shape[1] != Ly:
-                dynamics_logger.info("resizing 3D masks to original image size")
-                if mask.shape[1] != Ly:
-                    mask = transforms.resize_image(mask, Ly=Ly, Lx=Lx,
-                                                no_channels=True, 
-                                                interpolation=cv2.INTER_NEAREST)
-                if mask.shape[0] != Lz:
-                    mask = transforms.resize_image(mask.transpose(1,0,2),
-                                                    Ly=Lz, Lx=Lx,
-                                                    no_channels=True, 
-                                                    interpolation=cv2.INTER_NEAREST).transpose(1,0,2)
+        dynamics_logger.warning("Resizing is deprecated in v4.0.1+")
 
     mask = utils.fill_holes_and_remove_small_masks(mask, min_size=min_size)
 

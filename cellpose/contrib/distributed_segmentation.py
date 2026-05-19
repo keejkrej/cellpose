@@ -1,5 +1,10 @@
 # stdlib imports
-import os, getpass, datetime, pathlib, tempfile, functools, glob
+import os
+import getpass
+import datetime
+import pathlib
+import tempfile
+import functools
 
 # non-stdlib core dependencies
 import numpy as np
@@ -347,7 +352,7 @@ def cluster(func):
         #       it does not check if they are set correctly in any way
         assert 'cluster' in kwargs or 'cluster_kwargs' in kwargs, \
         "Either cluster or cluster_kwargs must be defined"
-        if not 'cluster' in kwargs:
+        if 'cluster' not in kwargs:
             cluster_constructor = myLocalCluster
             F = lambda x: x in kwargs['cluster_kwargs']
             if F('ncpus') and F('min_workers') and F('max_workers'):

@@ -3,18 +3,15 @@ Copyright © 2025 Howard Hughes Medical Institute, Authored by Carsen Stringer ,
 """
 import os
 import numpy as np
-import cv2
 from scipy.ndimage import gaussian_filter
 from . import utils, io, transforms
 
 try:
-    import matplotlib
     MATPLOTLIB_ENABLED = True
 except:
     MATPLOTLIB_ENABLED = False
 
 try:
-    from skimage import color
     from skimage.segmentation import find_boundaries
     SKIMAGE_ENABLED = True
 except:

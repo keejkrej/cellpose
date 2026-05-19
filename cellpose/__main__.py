@@ -1,7 +1,8 @@
 """
 Copyright © 2025 Howard Hughes Medical Institute, Authored by Carsen Stringer , Michael Rariden and Marius Pachitariu.
 """
-import os, time
+import os
+import time
 import numpy as np
 from tqdm import tqdm
 from cellpose import utils, models, io, train
@@ -9,7 +10,7 @@ from .version import version_str
 from cellpose.cli import get_arg_parser
 
 try:
-    from cellpose.gui import gui3d, gui
+    from cellpose.gui import view as gui_view
     GUI_ENABLED = True
 except ImportError as err:
     GUI_ERROR = err
@@ -44,14 +45,11 @@ def main():
                 print("GUI ERROR: %s" % GUI_ERROR)
                 if GUI_IMPORT:
                     print(
-                        "GUI FAILED: GUI dependencies may not be installed, to install, run"
+                        "GUI FAILED: GUI dependencies may not be installed."
+                        " Install with: uv sync  (requires pyside6, pyqtgraph)"
                     )
-                    print("     pip install 'cellpose[gui]'")
             else:
-                if args.Zstack:
-                    gui3d.run()
-                else:
-                    gui.run()
+                gui_view.run()
             return
 
     ############################## run cellpose on images ##############################

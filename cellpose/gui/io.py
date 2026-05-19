@@ -1,27 +1,39 @@
 """
 Copyright © 2025 Howard Hughes Medical Institute, Authored by Carsen Stringer , Michael Rariden and Marius Pachitariu.
 """
-import os, gc
+import os
+import gc
 import numpy as np
 import cv2
 import fastremap
+import shutil
 
-from ..io import imread, imread_2D, imread_3D, imsave, outlines_to_text, add_model, remove_model, save_rois
+from ..io import imread, imread_2D, imread_3D, imsave, outlines_to_text, save_rois
 from ..models import normalize_default, MODEL_DIR, MODEL_LIST_PATH, get_user_models
 from ..utils import masks_to_outlines, outlines_list
 
 try:
-    import qtpy
-    from qtpy.QtWidgets import QFileDialog
+    from PySide6.QtWidgets import (
+        QDialog,
+        QDialogButtonBox,
+        QFileDialog,
+        QFormLayout,
+        QLabel,
+        QLineEdit,
+        QMessageBox,
+        QVBoxLayout,
+    )
     GUI = True
 except:
     GUI = False
 
 try:
-    import matplotlib.pyplot as plt
     MATPLOTLIB = True
 except:
     MATPLOTLIB = False
+
+
+from . import series
 
 
 def _init_model_list(parent):
@@ -30,33 +42,55 @@ def _init_model_list(parent):
     parent.model_strings = get_user_models()
 
 
+def _get_custom_model_dir():
+    custom_dir = MODEL_DIR.joinpath("custom")
+    custom_dir.mkdir(parents=True, exist_ok=True)
+    return custom_dir
+
+
+def _write_model_list(model_strings):
+    with open(MODEL_LIST_PATH, "w") as textfile:
+        for model_string in model_strings:
+            textfile.write(model_string + "\n")
+
+
 def _add_model(parent, filename=None, load_model=True):
     if filename is None:
         name = QFileDialog.getOpenFileName(parent, "Add model to GUI")
         filename = name[0]
-    add_model(filename)
+    if filename == "":
+        return
     fname = os.path.split(filename)[-1]
-    parent.ModelChooseC.addItems([fname])
+    target = _get_custom_model_dir().joinpath(fname)
+    try:
+        shutil.copyfile(filename, os.fspath(target))
+    except shutil.SameFileError:
+        pass
     parent.model_strings.append(fname)
+    parent.ModelChooseC.addItems([fname])
 
     for ind, model_string in enumerate(parent.model_strings[:-1]):
         if model_string == fname:
-            _remove_model(parent, ind=ind + 1)
+            _remove_model(parent, ind=ind + 1, verbose=False)
+    _write_model_list(parent.model_strings)
 
     parent.ModelChooseC.setCurrentIndex(len(parent.model_strings))
     if load_model:
         parent.model_choose(custom=True)
 
 
-def _remove_model(parent, ind=None):
+def _remove_model(parent, ind=None, verbose=True):
     if ind is None:
         ind = parent.ModelChooseC.currentIndex()
     if ind > 0:
-        modelstr = parent.ModelChooseC.currentText()
-        parent.ModelChooseC.removeItem(ind)
-        # remove model from txt path
-        remove_model(modelstr)
-        parent.model_strings.remove(modelstr)
+        ind -= 1
+        modelstr = parent.model_strings[ind]
+        parent.ModelChooseC.removeItem(ind + 1)
+        del parent.model_strings[ind]
+        _write_model_list(parent.model_strings)
+        model_path = _get_custom_model_dir().joinpath(modelstr)
+        if model_path.exists():
+            os.remove(os.fspath(model_path))
         if len(parent.model_strings) > 0:
             parent.ModelChooseC.setCurrentIndex(len(parent.model_strings))
         else:
@@ -97,6 +131,136 @@ def _get_train_set(image_names):
     return train_data, train_labels, train_files, restore, normalize_params
 
 
+def _clear_series_state(parent):
+    if hasattr(parent, "view_model"):
+        parent.view_model.reset_series()
+        if hasattr(parent, "_sync_series_state"):
+            parent._sync_series_state()
+    else:
+        parent.series_dataset = None
+        parent.series_index = None
+        parent.output_filename = None
+        parent.display_filename = None
+    if hasattr(parent, "set_series_navigation_state"):
+        parent.set_series_navigation_state()
+
+
+def _set_series_state(parent, dataset=None, item_index=None):
+    if dataset is None or item_index is None:
+        if hasattr(parent, "view_model"):
+            parent.view_model.reset_series()
+            if hasattr(parent, "_sync_series_state"):
+                parent._sync_series_state()
+        else:
+            parent.series_dataset = None
+            parent.series_index = None
+            parent.output_filename = None
+        if hasattr(parent, "set_series_navigation_state"):
+            parent.set_series_navigation_state()
+        return
+
+    if hasattr(parent, "view_model"):
+        parent.view_model.set_series(dataset=dataset, record_index=item_index)
+        if hasattr(parent, "_sync_series_state"):
+            parent._sync_series_state()
+    else:
+        item = dataset["records"][item_index]
+        parent.series_dataset = dataset
+        parent.series_index = item_index
+        parent.output_filename = series.get_output_filename(dataset, item_index)
+        parent.display_filename = item["label"]
+        parent.filename = item["path"]
+    if hasattr(parent, "set_series_navigation_state"):
+        parent.set_series_navigation_state(dataset, item_index)
+
+
+def _get_output_filename(parent):
+    if hasattr(parent, "view_model"):
+        return parent.view_model.output_filename(parent.filename)
+    return parent.output_filename if getattr(parent, "output_filename", None) else parent.filename
+
+
+def _prompt_series_templates(parent, folder):
+    suggestion = series.suggest_series_templates(folder)
+    subfolder_text = getattr(parent, "last_series_subfolder_template", "")
+    filename_text = getattr(parent, "last_series_filename_template", "")
+    if not subfolder_text:
+        subfolder_text = suggestion["subfolder_template"]
+    if not filename_text:
+        filename_text = suggestion["filename_template"]
+
+    dialog = QDialog(parent)
+    dialog.setWindowTitle("Load folder with pattern")
+    dialog.setMinimumWidth(500)
+
+    layout = QVBoxLayout(dialog)
+    info_label = QLabel(
+        "Use placeholders {t}, {p}, {c}, {z}. Subfolder matching is case-insensitive."
+    )
+    info_label.setWordWrap(True)
+    layout.addWidget(info_label)
+
+    form = QFormLayout()
+    subfolder_edit = QLineEdit(subfolder_text)
+    filename_edit = QLineEdit(filename_text)
+    form.addRow("Subfolder template:", subfolder_edit)
+    form.addRow("Filename template:", filename_edit)
+    layout.addLayout(form)
+
+    button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+    button_box.accepted.connect(dialog.accept)
+    button_box.rejected.connect(dialog.reject)
+    layout.addWidget(button_box)
+
+    if dialog.exec() != QDialog.Accepted:
+        return None
+
+    return subfolder_edit.text().strip(), filename_edit.text().strip()
+
+
+def _load_image_series(parent):
+    folder = QFileDialog.getExistingDirectory(parent, "Load image folder")
+    if folder == "":
+        return
+
+    templates = _prompt_series_templates(parent, folder)
+    if templates is None:
+        return
+
+    subfolder_template, filename_template = templates
+    if filename_template == "":
+        return
+
+    parent.last_series_subfolder_template = subfolder_template
+    parent.last_series_filename_template = filename_template
+
+    try:
+        dataset = series.build_series_dataset(
+            folder,
+            subfolder_template=subfolder_template,
+            filename_template=filename_template,
+        )
+        _load_series_item(parent, dataset, 0, load_seg=True, load_3D=parent.load_3D)
+    except Exception as e:
+        print(f"ERROR: {e}")
+        QMessageBox.warning(parent, "Load folder with pattern", str(e))
+
+
+def _load_series_item(parent, dataset, item_index, load_seg=True, load_3D=False):
+    output_filename = series.get_output_filename(dataset, item_index)
+    seg_filename = os.path.splitext(output_filename)[0] + "_seg.npy"
+    if load_seg and os.path.isfile(seg_filename):
+        _load_seg(parent, filename=seg_filename, load_3D=load_3D)
+        if getattr(parent, "series_dataset", None) is None:
+            _set_series_state(parent, dataset=dataset, item_index=item_index)
+        parent.setWindowTitle(parent.display_filename or parent.filename)
+        return
+
+    _load_image(parent, filename=output_filename, load_seg=False, load_3D=load_3D)
+    _set_series_state(parent, dataset=dataset, item_index=item_index)
+    parent.setWindowTitle(parent.display_filename or parent.filename)
+
+
 def _load_image(parent, filename=None, load_seg=True, load_3D=False):
     """ load image with filename; if None, open QFileDialog
     if image is grey change view to default to grey scale 
@@ -110,6 +274,7 @@ def _load_image(parent, filename=None, load_seg=True, load_3D=False):
         filename = name[0]
         if filename == "":
             return
+    _clear_series_state(parent)
     manual_file = os.path.splitext(filename)[0] + "_seg.npy"
     load_mask = False
     if load_seg:
@@ -120,11 +285,7 @@ def _load_image(parent, filename=None, load_seg=True, load_3D=False):
             else:
                 image = None
             _load_seg(parent, manual_file, image=image, image_file=filename,
-                        load_3D=load_3D)
-            if len(np.unique(image[..., 1:])) == 1:
-                parent.color = 'gray' # updates the plot automatically
-            else:
-                parent.update_plot()
+                      load_3D=load_3D)
             return
         elif parent.autoloadMasks.isChecked():
             mask_file = os.path.splitext(filename)[0] + "_masks" + os.path.splitext(
@@ -147,6 +308,8 @@ def _load_image(parent, filename=None, load_seg=True, load_3D=False):
     if parent.loaded:
         parent.reset()
         parent.filename = filename
+        parent.display_filename = filename
+        parent.output_filename = None
         filename = os.path.split(parent.filename)[-1]
         _initialize_images(parent, image, load_3D=load_3D)
         parent.loaded = True
@@ -154,12 +317,7 @@ def _load_image(parent, filename=None, load_seg=True, load_3D=False):
         if load_mask:
             _load_masks(parent, filename=mask_file)
 
-    # check if gray and adjust viewer:
-    if len(np.unique(image[..., 1:])) == 1:
-        parent.color = 'gray' # triggers update_plot
-    else:
-        parent.update_plot()
-
+        
 def _initialize_images(parent, image, load_3D=False):
     """ format image for GUI
 
@@ -169,7 +327,7 @@ def _initialize_images(parent, image, load_3D=False):
     load_3D = parent.load_3D if load_3D is False else load_3D
 
     parent.stack = image
-    parent.logger.info(f" : image shape: {image.shape}")
+    print(f"GUI_INFO: image shape: {image.shape}")
     if load_3D:
         parent.NZ = len(parent.stack)
         parent.scroll.setMaximum(parent.NZ - 1)
@@ -186,7 +344,7 @@ def _initialize_images(parent, image, load_3D=False):
     parent.stack *= 255
 
     if load_3D:
-        parent.logger.info(": converted to float and normalized values to 0.0->255.0")
+        print("GUI_INFO: converted to float and normalized values to 0.0->255.0")
 
     del image
     gc.collect()
@@ -203,16 +361,13 @@ def _initialize_images(parent, image, load_3D=False):
     else:
         parent.Lyr, parent.Lxr = parent.Ly, parent.Lx
     parent.clear_all()
+    parent.saturation = [[[0, 255] for n in range(parent.NZ)]]
+    parent.sliders[0].setValue([0, 255])
 
     if not hasattr(parent, "stack_filtered") and parent.restore:
-        parent.logger.info(": no 'img_restore' found, applying current settings")
+        print("GUI_INFO: no 'img_restore' found, applying current settings")
         parent.compute_restore()
 
-    if parent.autobtn.isChecked():
-        if parent.restore is None or parent.restore != "filter":
-            parent.logger.info(": normalization checked: computing saturation levels (and optionally filtered image)")
-            parent.compute_saturation()
-    
     parent.compute_scale()
     parent.track_changes = []
 
@@ -238,6 +393,17 @@ def _load_seg(parent, filename=None, image=None, image_file=None, load_3D=False)
         parent.loaded = False
         print("ERROR: not NPY")
         return
+
+    dataset = None
+    dataset_index = None
+    if image is None and "image_series" in dat:
+        try:
+            dataset, dataset_index = series.resolve_series_metadata(dat["image_series"])
+            image_file = dataset["records"][dataset_index]["path"]
+        except Exception as e:
+            print(f"ERROR: cannot reconstruct image series state, {e}")
+            dataset = None
+            dataset_index = None
 
     parent.reset()
     if image is None:
@@ -272,6 +438,13 @@ def _load_seg(parent, filename=None, image=None, image_file=None, load_3D=False)
                 return
     else:
         parent.filename = image_file
+
+    if dataset is not None:
+        _set_series_state(parent, dataset=dataset, item_index=dataset_index)
+    else:
+        _clear_series_state(parent)
+        parent.output_filename = None
+        parent.display_filename = parent.filename
 
     parent.restore = None
     parent.ratio = 1.
@@ -313,7 +486,7 @@ def _load_seg(parent, filename=None, image=None, image_file=None, load_3D=False)
 
         if "manual_changes" in dat:
             parent.track_changes = dat["manual_changes"]
-            parent.logger.info("loaded in previous changes")
+            print("GUI_INFO: loaded in previous changes")
         if "zdraw" in dat:
             parent.zdraw = dat["zdraw"]
         else:
@@ -327,12 +500,8 @@ def _load_seg(parent, filename=None, image=None, image_file=None, load_3D=False)
         if len(dat["ismanual"]) == parent.ncells:
             parent.ismanual = dat["ismanual"]
 
-    if "current_channel" in dat:
-        # saved as int, loading int is built into .color property
-        color = dat['current_channel']
-        if isinstance(color, tuple):
-            color = color[0]
-        parent.color = color
+    if hasattr(parent, "set_instance_classes"):
+        parent.set_instance_classes(dat.get("instance_classes"))
 
     if "flows" in dat:
         parent.flows = dat["flows"]
@@ -358,7 +527,6 @@ def _load_seg(parent, filename=None, image=None, image_file=None, load_3D=False)
 
     parent.enable_buttons()
     parent.update_layer()
-    parent.update_plot()
     del dat
     gc.collect()
 
@@ -397,6 +565,7 @@ def _load_masks(parent, filename=None):
     del masks
     gc.collect()
     parent.update_layer()
+    parent.update_plot()
 
 
 def _masks_to_gui(parent, masks, outlines=None, colors=None):
@@ -404,7 +573,7 @@ def _masks_to_gui(parent, masks, outlines=None, colors=None):
     # get unique values
     shape = masks.shape
     if len(fastremap.unique(masks)) != masks.max() + 1:
-        parent.logger.info("renumbering masks")
+        print("GUI_INFO: renumbering masks")
         fastremap.renumber(masks, in_place=True)
         outlines = None
         masks = masks.reshape(shape)
@@ -429,7 +598,7 @@ def _masks_to_gui(parent, masks, outlines=None, colors=None):
             if parent.cellpix_orig.ndim == 2:
                 parent.cellpix_orig = parent.cellpix_orig[np.newaxis, :, :]
 
-    parent.logger.info(f"{masks.max()} masks found")
+    print(f"GUI_INFO: {masks.max()} masks found")
 
     # get outlines
     if outlines is None:  # parent.outlinesOn
@@ -443,7 +612,7 @@ def _masks_to_gui(parent, masks, outlines=None, colors=None):
                 outlines = masks_to_outlines(parent.cellpix_orig[z])
                 parent.outpix_orig[z] = outlines * parent.cellpix_orig[z]
             if z % 50 == 0 and parent.NZ > 1:
-                parent.logger.info("plane %d outlines processed" % z)
+                print("GUI_INFO: plane %d outlines processed" % z)
         if parent.restore and "upsample" in parent.restore:
             parent.outpix_resize = parent.outpix.copy()
     else:
@@ -455,7 +624,7 @@ def _masks_to_gui(parent, masks, outlines=None, colors=None):
                 outlines = masks_to_outlines(parent.cellpix_orig[z])
                 parent.outpix_orig[z] = outlines * parent.cellpix_orig[z]
                 if z % 50 == 0 and parent.NZ > 1:
-                    parent.logger.info("plane %d outlines processed" % z)
+                    print("GUI_INFO: plane %d outlines processed" % z)
 
     if parent.outpix.ndim == 2:
         parent.outpix = parent.outpix[np.newaxis, :, :]
@@ -467,7 +636,7 @@ def _masks_to_gui(parent, masks, outlines=None, colors=None):
 
     parent.ncells.set(parent.cellpix.max())
     colors = parent.colormap[:parent.ncells.get(), :3] if colors is None else colors
-    parent.logger.info("creating cellcolors and drawing masks")
+    print("GUI_INFO: creating cellcolors and drawing masks")
     parent.cellcolors = np.concatenate((np.array([[255, 255, 255]]), colors),
                                        axis=0).astype(np.uint8)
     if parent.ncells > 0:
@@ -475,6 +644,8 @@ def _masks_to_gui(parent, masks, outlines=None, colors=None):
         parent.toggle_mask_ops()
     parent.ismanual = np.zeros(parent.ncells.get(), bool)
     parent.zdraw = list(-1 * np.ones(parent.ncells.get(), np.int16))
+    if hasattr(parent, "set_instance_classes"):
+        parent.set_instance_classes()
 
     if hasattr(parent, "stack_filtered"):
         parent.ViewDropDown.setCurrentIndex(parent.ViewDropDown.count() - 1)
@@ -485,39 +656,39 @@ def _masks_to_gui(parent, masks, outlines=None, colors=None):
 
 def _save_png(parent):
     """ save masks to png or tiff (if 3D) """
-    filename = parent.filename
+    filename = _get_output_filename(parent)
     base = os.path.splitext(filename)[0]
     if parent.NZ == 1:
         if parent.cellpix[0].max() > 65534:
-            parent.logger.info("saving 2D masks to tif (too many masks for PNG)")
+            print("GUI_INFO: saving 2D masks to tif (too many masks for PNG)")
             imsave(base + "_cp_masks.tif", parent.cellpix[0])
         else:
-            parent.logger.info("saving 2D masks to png")
+            print("GUI_INFO: saving 2D masks to png")
             imsave(base + "_cp_masks.png", parent.cellpix[0].astype(np.uint16))
     else:
-        parent.logger.info("saving 3D masks to tiff")
+        print("GUI_INFO: saving 3D masks to tiff")
         imsave(base + "_cp_masks.tif", parent.cellpix)
 
 
 def _save_flows(parent):
     """ save flows and cellprob to tiff """
-    filename = parent.filename
+    filename = _get_output_filename(parent)
     base = os.path.splitext(filename)[0]
-    parent.logger.info("saving flows and cellprob to tiff")
+    print("GUI_INFO: saving flows and cellprob to tiff")
     if len(parent.flows) > 0:
         imsave(base + "_cp_cellprob.tif", parent.flows[1])
         for i in range(3):
             imsave(base + f"_cp_flows_{i}.tif", parent.flows[0][..., i])
         if len(parent.flows) > 2:
             imsave(base + "_cp_flows.tif", parent.flows[2])
-        parent.logger.info("saved flows and cellprob")
+        print("GUI_INFO: saved flows and cellprob")
     else:
         print("ERROR: no flows or cellprob found")
 
 
 def _save_rois(parent):
     """ save masks as rois in .zip file for ImageJ """
-    filename = parent.filename
+    filename = _get_output_filename(parent)
     if parent.NZ == 1:
         print(
             f"GUI_INFO: saving {parent.cellpix[0].max()} ImageJ ROIs to .zip archive.")
@@ -527,7 +698,7 @@ def _save_rois(parent):
 
 
 def _save_outlines(parent):
-    filename = parent.filename
+    filename = _get_output_filename(parent)
     base = os.path.splitext(filename)[0]
     if parent.NZ == 1:
         print(
@@ -550,13 +721,10 @@ def _save_sets(parent):
     """ save masks to *_seg.npy. This function should be used when saving
     is forced, e.g. when clicking the save button. Otherwise, use _save_sets_with_check
     """
-    filename = parent.filename
+    filename = _get_output_filename(parent)
     base = os.path.splitext(filename)[0]
-    flow_threshold = parent.segmentation_settings.flow_threshold
-    cellprob_threshold = parent.segmentation_settings.cellprob_threshold
+    segmentation_params = parent.get_segmentation_parameters()
 
-    # use ints instead of strings for backwards compatibility with old _seg.npy files
-    color_int = list(parent.RGBDropDown.name_map.keys()).index(parent.color)
     if parent.NZ > 1:
         dat = {
             "outlines":
@@ -565,7 +733,6 @@ def _save_sets(parent):
                 parent.cellcolors[1:],
             "masks":
                 parent.cellpix,
-            "current_channel": color_int,
             "filename":
                 parent.filename,
             "flows":
@@ -576,9 +743,9 @@ def _save_sets(parent):
                 parent.current_model_path
                 if hasattr(parent, "current_model_path") else 0,
             "flow_threshold":
-                flow_threshold,
+                segmentation_params["flow_threshold"],
             "cellprob_threshold":
-                cellprob_threshold,
+                segmentation_params["cellprob_threshold"],
             "normalize_params":
                 parent.get_normalize_params(),
             "restore":
@@ -586,7 +753,7 @@ def _save_sets(parent):
             "ratio":
                 parent.ratio,
             "diameter":
-                parent.segmentation_settings.diameter
+                segmentation_params["diameter"]
         }
         if parent.restore is not None:
             dat["img_restore"] = parent.stack_filtered
@@ -594,12 +761,12 @@ def _save_sets(parent):
         dat = {
             "outlines":
                 parent.outpix.squeeze() if parent.restore is None or
-                not "upsample" in parent.restore else parent.outpix_resize.squeeze(),
+                "upsample" not in parent.restore else parent.outpix_resize.squeeze(),
             "colors":
                 parent.cellcolors[1:],
             "masks":
                 parent.cellpix.squeeze() if parent.restore is None or
-                not "upsample" in parent.restore else parent.cellpix_resize.squeeze(),
+                "upsample" not in parent.restore else parent.cellpix_resize.squeeze(),
             "filename":
                 parent.filename,
             "flows":
@@ -612,9 +779,9 @@ def _save_sets(parent):
                 parent.current_model_path
                 if hasattr(parent, "current_model_path") else 0,
             "flow_threshold":
-                flow_threshold,
+                segmentation_params["flow_threshold"],
             "cellprob_threshold":
-                cellprob_threshold,
+                segmentation_params["cellprob_threshold"],
             "normalize_params":
                 parent.get_normalize_params(),
             "restore":
@@ -622,13 +789,23 @@ def _save_sets(parent):
             "ratio":
                 parent.ratio,
             "diameter":
-                parent.segmentation_settings.diameter
+                segmentation_params["diameter"]
         }
         if parent.restore is not None:
             dat["img_restore"] = parent.stack_filtered
+    if hasattr(parent, "_ensure_instance_classes"):
+        parent._ensure_instance_classes()
+        dat["instance_classes"] = parent.instance_classes
+    if (
+        getattr(parent, "series_dataset", None) is not None
+        and parent.series_index is not None
+    ):
+        dat["image_series"] = series.build_series_metadata(
+            parent.series_dataset, parent.series_index
+        )
     try:
         np.save(base + "_seg.npy", dat)
-        parent.logger.info("%d ROIs saved to %s" % (parent.ncells.get(), base + "_seg.npy"))
+        print("GUI_INFO: %d ROIs saved to %s" % (parent.ncells.get(), base + "_seg.npy"))
     except Exception as e:
         print(f"ERROR: {e}")
     del dat

@@ -2,7 +2,10 @@
 Copyright © 2025 Howard Hughes Medical Institute, Authored by Carsen Stringer , Michael Rariden and Marius Pachitariu.
 """
 import logging
-import os, tempfile, shutil, io
+import os
+import tempfile
+import shutil
+import io
 from tqdm import tqdm, trange
 from urllib.request import urlopen
 import cv2
@@ -16,7 +19,6 @@ from multiprocessing import Pool, cpu_count
 from cellpose import metrics
 
 try:
-    from skimage.morphology import remove_small_holes
     SKIMAGE_ENABLED = True
 except:
     SKIMAGE_ENABLED = False

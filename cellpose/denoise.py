@@ -1,7 +1,9 @@
 """
 Copyright © 2025 Howard Hughes Medical Institute, Authored by Carsen Stringer , Michael Rariden and Marius Pachitariu.
 """
-import os, time, datetime
+import os
+import time
+import datetime
 import numpy as np
 from scipy.stats import mode
 import cv2
@@ -952,7 +954,7 @@ def train(net, train_data=None, train_labels=None, train_files=None, test_data=N
     else:
         nimg = len(train_files)
         denoise_logger.info(">>> using files instead of loading dataset")
-        train_labels_files = [str(tf)[:-4] + f"_flows.tif" for tf in train_files]
+        train_labels_files = [str(tf)[:-4] + "_flows.tif" for tf in train_files]
         denoise_logger.info(">>> computing diameters")
         diam_train = np.array([
             utils.diameters(io.imread(train_labels_files[k])[0])[0]
@@ -961,7 +963,7 @@ def train(net, train_data=None, train_labels=None, train_files=None, test_data=N
         diam_train[diam_train < 5] = 5.
         if test_files is not None:
             nimg_test = len(test_files)
-            test_labels_files = [str(tf)[:-4] + f"_flows.tif" for tf in test_files]
+            test_labels_files = [str(tf)[:-4] + "_flows.tif" for tf in test_files]
             diam_test = np.array([
                 utils.diameters(io.imread(test_labels_files[k])[0])[0]
                 for k in trange(len(test_labels_files))

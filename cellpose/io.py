@@ -1,12 +1,17 @@
 """
 Copyright © 2025 Howard Hughes Medical Institute, Authored by Carsen Stringer , Michael Rariden and Marius Pachitariu.
 """
-import os, warnings, glob, shutil
+import os
+import warnings
+import glob
+import shutil
 from natsort import natsorted
 import numpy as np
 import cv2
 import tifffile
-import logging, pathlib, sys
+import logging
+import pathlib
+import sys
 from tqdm import tqdm
 from pathlib import Path
 import re
@@ -14,8 +19,6 @@ from .version import version_str
 from roifile import ImagejRoi, roiwrite
 
 try:
-    from qtpy import QtGui, QtCore, Qt, QtWidgets
-    from qtpy.QtWidgets import QMessageBox
     GUI = True
 except:
     GUI = False
@@ -39,7 +42,6 @@ except:
     NRRD = False
 
 try:
-    from google.cloud import storage
     SERVER_UPLOAD = True
 except:
     SERVER_UPLOAD = False
@@ -79,32 +81,20 @@ def logger_setup(cp_path=".cellpose", logfile_name="run.log", stdout_file_replac
     log_file = cp_dir.joinpath(logfile_name)
     try:
         log_file.unlink()
-    except FileNotFoundError:
+    except:
         print('creating new log file')
-    logfile_fh = logging.FileHandler(log_file)
+    handlers = [logging.FileHandler(log_file),]
     if stdout_file_replacement is not None:
-        stdout_fh = logging.FileHandler(stdout_file_replacement)
+        handlers.append(logging.FileHandler(stdout_file_replacement))
     else:
-        stdout_fh = logging.StreamHandler(sys.stdout)
-
-    formatter = logging.Formatter("%(asctime)s [%(module)s %(levelname)s] %(message)s")
-    debug_formatter = logging.Formatter("%(asctime)s %(levelname)s [%(filename)s:%(lineno)d - %(funcName)20s()] %(message)s")
-    logger = logging.getLogger('cellpose')
-    logger.setLevel(logging.DEBUG)
-    logger.handlers.clear()
-
-    logfile_fh.setFormatter(debug_formatter)
-    logfile_fh.setLevel(logging.DEBUG)
-    logger.addHandler(logfile_fh)
-
-    stdout_fh.setFormatter(formatter)
-    stdout_fh.setLevel(logging.INFO)
-    logger.addHandler(stdout_fh)
-
-    logger.propagate = False
-
-    print(f"[GUI INFO] : WRITING LOG OUTPUT TO {log_file}")
-    print(version_str)
+        handlers.append(logging.StreamHandler(sys.stdout))
+    logging.basicConfig(
+                    level=logging.INFO,
+                    format="%(asctime)s [%(levelname)s] %(message)s",
+                    handlers=handlers,
+                    force=True
+    )
+    logger = logging.getLogger(__name__)
     logger.info(f"WRITING LOG OUTPUT TO {log_file}")
     logger.info(version_str)
 
@@ -348,9 +338,6 @@ def remove_model(filename, delete=False):
     filename = os.path.split(filename)[-1]
     from . import models
     model_strings = models.get_user_models()
-    if filename not in model_strings:
-        raise ValueError(f'filename not found: {filename}')
-    model_strings.remove(filename)
     if len(model_strings) > 0:
         with open(models.MODEL_LIST_PATH, "w") as textfile:
             for fname in model_strings:
@@ -359,10 +346,10 @@ def remove_model(filename, delete=False):
         # write empty file
         textfile = open(models.MODEL_LIST_PATH, "w")
         textfile.close()
-    io_logger.info(f"{filename} removed from custom model list")
+    print(f"{filename} removed from custom model list")
     if delete:
-        os.remove(os.fspath(models.MODEL_DIR.joinpath(filename)))
-        io_logger.info(f"{filename} model deleted from disk")
+        os.remove(os.fspath(models.MODEL_DIR.joinpath(fname)))
+        print("model deleted")
 
 
 def add_model(filename):
