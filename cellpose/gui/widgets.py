@@ -8,7 +8,7 @@ import numpy as np
 
 os.environ.setdefault("PYQTGRAPH_QT_LIB", "PySide6")
 from PySide6 import QtCore
-from PySide6.QtWidgets import QFrame, QSlider, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QSlider, QVBoxLayout, QWidget
 import pyqtgraph as pg
 
 Horizontal = QtCore.Qt.Orientation.Horizontal
@@ -32,11 +32,23 @@ class Slider(QWidget):
         self.lowerSlider.valueChanged.connect(self._update_value)
         self.upperSlider.valueChanged.connect(self._update_value)
 
+        min_row = QHBoxLayout()
+        min_row.setContentsMargins(0, 0, 0, 0)
+        min_row.setSpacing(6)
+        min_row.addWidget(QLabel("min"))
+        min_row.addWidget(self.lowerSlider, 1)
+
+        max_row = QHBoxLayout()
+        max_row.setContentsMargins(0, 0, 0, 0)
+        max_row.setSpacing(6)
+        max_row.addWidget(QLabel("max"))
+        max_row.addWidget(self.upperSlider, 1)
+
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
-        layout.addWidget(self.lowerSlider)
-        layout.addWidget(self.upperSlider)
+        layout.addLayout(min_row)
+        layout.addLayout(max_row)
         self.show()
 
     def setMinimum(self, value):

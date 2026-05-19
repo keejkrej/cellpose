@@ -18,7 +18,7 @@ struct LeftSidebarView: View {
                                 }
                             ),
                             isEnabled: viewModel.seriesState.isLoaded
-                                && (viewModel.seriesState.axisValues[axis]?.count ?? 0) > 0,
+                                && (viewModel.seriesState.axisValues[axis]?.count ?? 0) > 1,
                             onStep: { delta in
                                 Task { await viewModel.navigateSeriesAxis(axis, delta: delta) }
                             }
@@ -39,14 +39,16 @@ struct LeftSidebarView: View {
                         Task { await viewModel.computeSaturation() }
                     }
                     .disabled(!viewModel.imageLoaded || viewModel.isBusy)
-                    HStack {
-                        Text("gray:")
-                            .frame(width: 36, alignment: .leading)
-                        Slider(value: $viewModel.displayParams.grayLow, in: 0 ... 255, step: 1)
-                            .disabled(!viewModel.imageLoaded)
-                        Slider(value: $viewModel.displayParams.grayHigh, in: 0 ... 255, step: 1)
-                            .disabled(!viewModel.imageLoaded)
-                    }
+                    SaturationSliderRow(
+                        label: "min",
+                        value: $viewModel.displayParams.grayLow,
+                        isEnabled: viewModel.imageLoaded
+                    )
+                    SaturationSliderRow(
+                        label: "max",
+                        value: $viewModel.displayParams.grayHigh,
+                        isEnabled: viewModel.imageLoaded
+                    )
                 }
 
                 SidebarPanel(title: "Preprocessing") {
@@ -84,12 +86,36 @@ struct LeftSidebarView: View {
     }
 }
 
+private struct SaturationSliderRow: View {
+    let label: String
+    @Binding var value: Double
+    let isEnabled: Bool
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Text(label)
+                .frame(width: 28, alignment: .leading)
+            Slider(value: $value, in: 0 ... 255)
+                .disabled(!isEnabled)
+        }
+    }
+}
+
 private struct SeriesAxisRow: View {
     let label: String
     let values: [String]
     @Binding var index: Int
     let isEnabled: Bool
     let onStep: (Int) -> Void
+
+    private var maxIndex: Int {
+        max(values.count - 1, 0)
+    }
+
+    /// SwiftUI needs a non-empty range when disabled; Qt uses 0...0.
+    private var sliderUpperBound: Double {
+        Double(max(maxIndex, 1))
+    }
 
     var body: some View {
         HStack(spacing: 6) {
@@ -99,15 +125,14 @@ private struct SeriesAxisRow: View {
                 .disabled(!isEnabled || index <= 0)
             Slider(
                 value: Binding(
-                    get: { Double(index) },
-                    set: { index = Int($0.rounded()) }
+                    get: { Double(min(index, maxIndex)) },
+                    set: { index = min(maxIndex, max(0, Int($0.rounded()))) }
                 ),
-                in: 0 ... Double(max(values.count - 1, 0)),
-                step: 1
+                in: 0 ... sliderUpperBound
             )
             .disabled(!isEnabled)
             Button(">") { onStep(1) }
-                .disabled(!isEnabled || index >= max(values.count - 1, 0))
+                .disabled(!isEnabled || index >= maxIndex)
         }
     }
 }

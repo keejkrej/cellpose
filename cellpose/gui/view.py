@@ -287,15 +287,11 @@ class MainW(QMainWindow):
         self.satBoxV.addWidget(self.autoSaturationButton)
 
         self.sliders = []
-        gray_slider_layout = QHBoxLayout()
-        label = QLabel("gray:")
-        gray_slider_layout.addWidget(label)
         self.sliders.append(Slider(self, "gray", [100, 100, 100]))
         self.sliders[-1].setMinimum(-0.1)
         self.sliders[-1].setMaximum(255.1)
         self.sliders[-1].setValue([0, 255])
-        gray_slider_layout.addWidget(self.sliders[-1], 1)
-        self.satBoxV.addLayout(gray_slider_layout)
+        self.satBoxV.addWidget(self.sliders[-1])
 
         b += 1
         self.drawBox = QGroupBox("Drawing")
