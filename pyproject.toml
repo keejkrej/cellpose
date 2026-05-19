@@ -33,6 +33,10 @@ dependencies = [
     "nd2",
     "pynrrd",
     "bioimageio.core",
+    "fastapi",
+    "uvicorn",
+    "python-multipart",
+    "pydantic",
 ]
 
 [project.scripts]

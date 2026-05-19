@@ -1,0 +1,350 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 56;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		A10000000000000000000001 /* CellposeGUIApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000001 /* CellposeGUIApp.swift */; };
+		A10000000000000000000002 /* AppModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000002 /* AppModels.swift */; };
+		A10000000000000000000003 /* MainViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000003 /* MainViewModel.swift */; };
+		A10000000000000000000004 /* SegmentationEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000004 /* SegmentationEngine.swift */; };
+		A10000000000000000000005 /* SidecarClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000005 /* SidecarClient.swift */; };
+		A10000000000000000000006 /* SidecarProcessManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000006 /* SidecarProcessManager.swift */; };
+		A10000000000000000000007 /* ImageCanvasView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000007 /* ImageCanvasView.swift */; };
+		A10000000000000000000008 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000008 /* ContentView.swift */; };
+		A10000000000000000000009 /* LeftSidebarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000009 /* LeftSidebarView.swift */; };
+		A1000000000000000000000A /* RightSidebarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000000A /* RightSidebarView.swift */; };
+		A1000000000000000000000B /* TrainDialogView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000000B /* TrainDialogView.swift */; };
+		A1000000000000000000000C /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000000C /* Assets.xcassets */; };
+		A1000000000000000000000D /* AppCommands.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000010 /* AppCommands.swift */; };
+		A1000000000000000000000E /* LoadFolderPatternSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000011 /* LoadFolderPatternSheet.swift */; };
+		A1000000000000000000000F /* SidebarComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000012 /* SidebarComponents.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		A20000000000000000000001 /* CellposeGUIApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CellposeGUIApp.swift; sourceTree = "<group>"; };
+		A20000000000000000000002 /* AppModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppModels.swift; sourceTree = "<group>"; };
+		A20000000000000000000003 /* MainViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainViewModel.swift; sourceTree = "<group>"; };
+		A20000000000000000000004 /* SegmentationEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SegmentationEngine.swift; sourceTree = "<group>"; };
+		A20000000000000000000005 /* SidecarClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SidecarClient.swift; sourceTree = "<group>"; };
+		A20000000000000000000006 /* SidecarProcessManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SidecarProcessManager.swift; sourceTree = "<group>"; };
+		A20000000000000000000007 /* ImageCanvasView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImageCanvasView.swift; sourceTree = "<group>"; };
+		A20000000000000000000008 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		A20000000000000000000009 /* LeftSidebarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LeftSidebarView.swift; sourceTree = "<group>"; };
+		A2000000000000000000000A /* RightSidebarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RightSidebarView.swift; sourceTree = "<group>"; };
+		A2000000000000000000000B /* TrainDialogView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrainDialogView.swift; sourceTree = "<group>"; };
+		A2000000000000000000000C /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		A2000000000000000000000D /* CellposeGUI.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = CellposeGUI.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		A2000000000000000000000E /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		A2000000000000000000000F /* CellposeGUI.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = CellposeGUI.entitlements; sourceTree = "<group>"; };
+		A20000000000000000000010 /* AppCommands.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppCommands.swift; sourceTree = "<group>"; };
+		A20000000000000000000011 /* LoadFolderPatternSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoadFolderPatternSheet.swift; sourceTree = "<group>"; };
+		A20000000000000000000012 /* SidebarComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SidebarComponents.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		A30000000000000000000001 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		A40000000000000000000001 = {
+			isa = PBXGroup;
+			children = (
+				A40000000000000000000002 /* CellposeGUI */,
+				A40000000000000000000003 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		A40000000000000000000002 /* CellposeGUI */ = {
+			isa = PBXGroup;
+			children = (
+				A40000000000000000000004 /* App */,
+				A40000000000000000000005 /* Models */,
+				A40000000000000000000006 /* ViewModels */,
+				A40000000000000000000007 /* Services */,
+				A40000000000000000000008 /* Rendering */,
+				A40000000000000000000009 /* Views */,
+				A4000000000000000000000A /* Resources */,
+				A2000000000000000000000E /* Info.plist */,
+				A2000000000000000000000F /* CellposeGUI.entitlements */,
+			);
+			path = CellposeGUI;
+			sourceTree = "<group>";
+		};
+		A40000000000000000000003 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				A2000000000000000000000D /* CellposeGUI.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		A40000000000000000000004 /* App */ = {
+			isa = PBXGroup;
+			children = (
+				A20000000000000000000001 /* CellposeGUIApp.swift */,
+				A20000000000000000000010 /* AppCommands.swift */,
+			);
+			path = App;
+			sourceTree = "<group>";
+		};
+		A40000000000000000000005 /* Models */ = {
+			isa = PBXGroup;
+			children = (
+				A20000000000000000000002 /* AppModels.swift */,
+			);
+			path = Models;
+			sourceTree = "<group>";
+		};
+		A40000000000000000000006 /* ViewModels */ = {
+			isa = PBXGroup;
+			children = (
+				A20000000000000000000003 /* MainViewModel.swift */,
+			);
+			path = ViewModels;
+			sourceTree = "<group>";
+		};
+		A40000000000000000000007 /* Services */ = {
+			isa = PBXGroup;
+			children = (
+				A20000000000000000000004 /* SegmentationEngine.swift */,
+				A20000000000000000000005 /* SidecarClient.swift */,
+				A20000000000000000000006 /* SidecarProcessManager.swift */,
+			);
+			path = Services;
+			sourceTree = "<group>";
+		};
+		A40000000000000000000008 /* Rendering */ = {
+			isa = PBXGroup;
+			children = (
+				A20000000000000000000007 /* ImageCanvasView.swift */,
+			);
+			path = Rendering;
+			sourceTree = "<group>";
+		};
+		A40000000000000000000009 /* Views */ = {
+			isa = PBXGroup;
+			children = (
+				A20000000000000000000008 /* ContentView.swift */,
+				A20000000000000000000009 /* LeftSidebarView.swift */,
+				A2000000000000000000000A /* RightSidebarView.swift */,
+				A2000000000000000000000B /* TrainDialogView.swift */,
+				A20000000000000000000011 /* LoadFolderPatternSheet.swift */,
+				A20000000000000000000012 /* SidebarComponents.swift */,
+			);
+			path = Views;
+			sourceTree = "<group>";
+		};
+		A4000000000000000000000A /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				A2000000000000000000000C /* Assets.xcassets */,
+			);
+			path = Resources;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		A50000000000000000000001 /* CellposeGUI */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A70000000000000000000003 /* Build configuration list for PBXNativeTarget "CellposeGUI" */;
+			buildPhases = (
+				A60000000000000000000001 /* Sources */,
+				A30000000000000000000001 /* Frameworks */,
+				A60000000000000000000002 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = CellposeGUI;
+			productName = CellposeGUI;
+			productReference = A2000000000000000000000D /* CellposeGUI.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		A80000000000000000000001 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 1500;
+				LastUpgradeCheck = 1500;
+				TargetAttributes = {
+					A50000000000000000000001 = {
+						CreatedOnToolsVersion = 15.0;
+					};
+				};
+			};
+			buildConfigurationList = A70000000000000000000001 /* Build configuration list for PBXProject "CellposeGUI" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = A40000000000000000000001;
+			productRefGroup = A40000000000000000000003 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				A50000000000000000000001 /* CellposeGUI */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		A60000000000000000000002 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A1000000000000000000000C /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		A60000000000000000000001 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A10000000000000000000001 /* CellposeGUIApp.swift in Sources */,
+				A10000000000000000000002 /* AppModels.swift in Sources */,
+				A10000000000000000000003 /* MainViewModel.swift in Sources */,
+				A10000000000000000000004 /* SegmentationEngine.swift in Sources */,
+				A10000000000000000000005 /* SidecarClient.swift in Sources */,
+				A10000000000000000000006 /* SidecarProcessManager.swift in Sources */,
+				A10000000000000000000007 /* ImageCanvasView.swift in Sources */,
+				A10000000000000000000008 /* ContentView.swift in Sources */,
+				A10000000000000000000009 /* LeftSidebarView.swift in Sources */,
+				A1000000000000000000000A /* RightSidebarView.swift in Sources */,
+				A1000000000000000000000B /* TrainDialogView.swift in Sources */,
+				A1000000000000000000000D /* AppCommands.swift in Sources */,
+				A1000000000000000000000E /* LoadFolderPatternSheet.swift in Sources */,
+				A1000000000000000000000F /* SidebarComponents.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		A90000000000000000000001 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ENABLE_MODULES = YES;
+				CODE_SIGN_ENTITLEMENTS = CellposeGUI/CellposeGUI.entitlements;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_TESTABILITY = YES;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = macosx;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		A90000000000000000000002 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ENABLE_MODULES = YES;
+				CODE_SIGN_ENTITLEMENTS = CellposeGUI/CellposeGUI.entitlements;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				SDKROOT = macosx;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+			};
+			name = Release;
+		};
+		A90000000000000000000003 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = CellposeGUI/CellposeGUI.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "";
+				ENABLE_HARDENED_RUNTIME = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = CellposeGUI/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = org.cellpose.gui;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		A90000000000000000000004 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = CellposeGUI/CellposeGUI.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "";
+				ENABLE_HARDENED_RUNTIME = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = CellposeGUI/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = org.cellpose.gui;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		A70000000000000000000001 /* Build configuration list for PBXProject "CellposeGUI" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A90000000000000000000001 /* Debug */,
+				A90000000000000000000002 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		A70000000000000000000003 /* Build configuration list for PBXNativeTarget "CellposeGUI" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A90000000000000000000003 /* Debug */,
+				A90000000000000000000004 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = A80000000000000000000001 /* Project object */;
+}

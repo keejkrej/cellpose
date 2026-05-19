@@ -1,0 +1,130 @@
+import SwiftUI
+
+struct RightSidebarView: View {
+    @Bindable var viewModel: MainViewModel
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 8) {
+                SidebarPanel(title: "Segmentation") {
+                    HStack {
+                        Text("model:")
+                        Picker("model", selection: $viewModel.selectedModelIndex) {
+                            ForEach(Array(viewModel.models.enumerated()), id: \.offset) { index, model in
+                                Text(model).tag(index)
+                            }
+                        }
+                        .labelsHidden()
+                    }
+                    LabeledContent("diameter") {
+                        TextField("0", value: $viewModel.segmentationParams.diameter, format: .number)
+                            .frame(width: 70)
+                    }
+                    LabeledContent("flow threshold") {
+                        TextField("0.4", value: $viewModel.segmentationParams.flowThreshold, format: .number)
+                            .frame(width: 70)
+                            .onChange(of: viewModel.segmentationParams.flowThreshold) {
+                                Task { await viewModel.recomputeFromThresholds() }
+                            }
+                    }
+                    LabeledContent("cellprob threshold") {
+                        TextField("0", value: $viewModel.segmentationParams.cellprobThreshold, format: .number)
+                            .frame(width: 70)
+                            .onChange(of: viewModel.segmentationParams.cellprobThreshold) {
+                                Task { await viewModel.recomputeFromThresholds() }
+                            }
+                    }
+                    LabeledContent("norm percentile lower") {
+                        TextField("1", value: $viewModel.segmentationParams.percentileLow, format: .number)
+                            .frame(width: 70)
+                    }
+                    LabeledContent("norm percentile upper") {
+                        TextField("99", value: $viewModel.segmentationParams.percentileHigh, format: .number)
+                            .frame(width: 70)
+                    }
+                    LabeledContent("niter dynamics") {
+                        TextField("0", value: $viewModel.segmentationParams.niter, format: .number)
+                            .frame(width: 70)
+                            .onChange(of: viewModel.segmentationParams.niter) {
+                                Task { await viewModel.recomputeFromThresholds() }
+                            }
+                    }
+                    HStack {
+                        Button("run") {
+                            Task { await viewModel.runSegmentation() }
+                        }
+                        .disabled(!viewModel.canRunSegmentation)
+                        ProgressView(value: viewModel.progress)
+                            .opacity(viewModel.isBusy ? 1 : 0)
+                    }
+                }
+
+                SidebarPanel(title: "Drawing") {
+                    HStack {
+                        Toggle("masks", isOn: $viewModel.showMasks)
+                        Toggle("outlines", isOn: $viewModel.showOutlines)
+                        Toggle("auto", isOn: $viewModel.autosave)
+                    }
+                    HStack {
+                        Text("default class")
+                        TextField("0", value: $viewModel.defaultClassID, format: .number)
+                            .frame(width: 60)
+                    }
+                }
+
+                SidebarPanel(title: "Instances") {
+                    HStack {
+                        Text("class filter:")
+                        TextField("all", text: $viewModel.classFilterText)
+                            .onSubmit { viewModel.refreshInstanceFilter() }
+                    }
+                    InstanceTableView(viewModel: viewModel)
+                        .frame(minHeight: 120)
+                }
+            }
+            .padding(.vertical, 8)
+        }
+        .sheet(isPresented: $viewModel.showTrainDialog) {
+            TrainDialogView(viewModel: viewModel, isPresented: $viewModel.showTrainDialog)
+        }
+    }
+}
+
+struct InstanceTableView: View {
+    @Bindable var viewModel: MainViewModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Text("ROI").frame(width: 60, alignment: .leading).font(.caption.bold())
+                Text("Class ID").font(.caption.bold())
+            }
+            if viewModel.ncells == 0 {
+                Text("")
+                    .frame(height: 1)
+            } else {
+                List(0 ..< viewModel.ncells, id: \.self) { row in
+                    HStack {
+                        Text("\(row + 1)")
+                            .frame(width: 60, alignment: .leading)
+                        TextField(
+                            "0",
+                            value: Binding(
+                                get: {
+                                    row < viewModel.instanceClasses.values.count
+                                        ? viewModel.instanceClasses.values[row]
+                                        : 0
+                                },
+                                set: { newValue in
+                                    viewModel.instanceClasses.setClass(row: row, classID: newValue)
+                                }
+                            ),
+                            format: .number
+                        )
+                        .frame(width: 60)
+                    }
+                }
+            }
+        }
+    }
+}
