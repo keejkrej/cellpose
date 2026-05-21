@@ -127,3 +127,7 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+
+# Xcode user-specific state
+**/xcuserdata/
+*.xcuserstate
