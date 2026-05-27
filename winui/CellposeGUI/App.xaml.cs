@@ -5,6 +5,7 @@ using CellposeGUI.Services;
 using CellposeGUI.Views;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Media.Animation;
 using Microsoft.UI.Xaml.Navigation;
 
 namespace CellposeGUI;
@@ -40,6 +41,9 @@ public partial class App : Application
         var rootFrame = new Frame();
         rootFrame.NavigationFailed += OnNavigationFailed;
         _window.Content = rootFrame;
+
+        if (_window.AppWindow is { } appWindow)
+            appWindow.Resize(new Windows.Graphics.SizeInt32(1280, 800));
 
         rootFrame.Navigate(typeof(LoadingPage), "Starting sidecar…");
         _window.Activate();
@@ -79,17 +83,17 @@ public partial class App : Application
 
             dispatcher.TryEnqueue(() =>
             {
-                if (!rootFrame.Navigate(typeof(MainPage), viewModel))
+                if (!rootFrame.Navigate(
+                        typeof(MainPage),
+                        viewModel,
+                        new SuppressNavigationTransitionInfo()))
                 {
                     SetLoadingStatus(rootFrame, "Failed to open main window.", failed: true);
                     return;
                 }
 
-                if (_window?.AppWindow is { } appWindow)
-                {
-                    appWindow.Resize(new Windows.Graphics.SizeInt32(1280, 800));
+                if (_window != null)
                     _window.Title = viewModel.WindowTitle;
-                }
             });
         }
         catch (Exception ex)

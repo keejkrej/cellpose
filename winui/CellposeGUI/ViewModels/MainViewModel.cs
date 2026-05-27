@@ -172,12 +172,13 @@ public sealed class MainViewModel : ObservableObject
         private set
         {
             SetProperty(ref _isSegmentationRunning, value);
-            Notify(nameof(SegmentationProgressOpacity));
+            Notify(nameof(SegmentationProgressVisibility));
             Notify(nameof(CanRunSegmentation));
         }
     }
 
-    public double SegmentationProgressOpacity => _isSegmentationRunning ? 1 : 0;
+    public Visibility SegmentationProgressVisibility =>
+        _isSegmentationRunning ? Visibility.Visible : Visibility.Collapsed;
 
     public double SegmentationProgress
     {

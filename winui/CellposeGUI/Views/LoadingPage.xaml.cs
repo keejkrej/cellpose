@@ -25,4 +25,10 @@ public sealed partial class LoadingPage : Page
         StatusText.Text = message;
         LoadingRing.IsActive = !failed;
     }
+
+    protected override void OnNavigatedFrom(Microsoft.UI.Xaml.Navigation.NavigationEventArgs e)
+    {
+        LoadingRing.IsActive = false;
+        base.OnNavigatedFrom(e);
+    }
 }

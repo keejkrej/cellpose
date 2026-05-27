@@ -82,7 +82,7 @@
                             Maximum="1"
                             HorizontalAlignment="Stretch"
                             IsIndeterminate="False"
-                            Opacity="{x:Bind ViewModel.SegmentationProgressOpacity, Mode=OneWay}"
+                            Visibility="{x:Bind ViewModel.SegmentationProgressVisibility, Mode=OneWay}"
                             Value="{x:Bind ViewModel.SegmentationProgress, Mode=OneWay}" />
                     </Grid>
                 </StackPanel>
