@@ -47,10 +47,11 @@ from ..transforms import normalize99, normalize99_tile, resize_image, smooth_sha
 from ..utils import download_url_to_file
 from . import io, menus, series
 from .dialogs import TrainWindow
-from .viewmodel import MainViewModel, ObservableVariable
+from .presenter import MainPresenter
 from .widgets import (
     CheckBoxHeader,
     ImageDraw,
+    ObservableVariable,
     SeriesAxisSlider,
     Slider,
     ViewBoxNoRightDrag,
@@ -117,9 +118,9 @@ class MainW(QMainWindow):
         app_icon.addFile(icon_path, QtCore.QSize(256, 256))
         self.setWindowIcon(app_icon)
 
-        self.view_model = MainViewModel(
+        self.presenter = MainPresenter(
+            self,
             model_save_folder=os.fspath(models.MODEL_DIR.joinpath("custom")),
-            parent=self,
         )
 
         menus.mainmenu(self)
@@ -171,7 +172,6 @@ class MainW(QMainWindow):
         self.NZ = 1
         self.restore = None
         self.ratio = 1.0
-        self._sync_series_state()
         self.last_series_subfolder_template = ""
         self.last_series_filename_template = ""
         self.reset()
@@ -194,14 +194,16 @@ class MainW(QMainWindow):
 
     @property
     def training_params(self):
-        return self.view_model.training_params
+        return self.presenter.training_params
 
     @training_params.setter
     def training_params(self, params):
-        self.view_model.set_training_parameters(params)
+        self.presenter.set_training_parameters(params)
 
-    def _sync_series_state(self):
-        state = self.view_model.series_state
+    def ncells(self) -> int:
+        return self.ncells_counter.get()
+
+    def sync_series_state(self, state):
         self.series_dataset = state.dataset
         self.series_index = state.record_index
         self.output_filename = state.output_filename
@@ -210,9 +212,60 @@ class MainW(QMainWindow):
             self.filename = state.filename
 
     def set_series_state(self, dataset=None, record_index=None):
-        self.view_model.set_series(dataset=dataset, record_index=record_index)
-        self._sync_series_state()
-        self.set_series_navigation_state(self.series_dataset, self.series_index)
+        self.presenter.set_series(dataset=dataset, record_index=record_index)
+
+    def read_segmentation_widgets(self):
+        return {
+            "diameter": self.seg_param_root.param("diameter").value(),
+            "flow_threshold": self.seg_param_root.param("flow_threshold").value(),
+            "cellprob_threshold": self.seg_param_root.param("cellprob_threshold").value(),
+            "percentile_low": self.seg_param_root.param("norm_percentile_low").value(),
+            "percentile_high": self.seg_param_root.param("norm_percentile_high").value(),
+            "niter": self.seg_param_root.param("niter").value(),
+        }
+
+    def apply_segmentation_widgets(self, params):
+        low, high = params.percentile
+        if self.seg_param_root.param("norm_percentile_low").value() != low:
+            self.seg_param_root.param("norm_percentile_low").setValue(low)
+        if self.seg_param_root.param("norm_percentile_high").value() != high:
+            self.seg_param_root.param("norm_percentile_high").setValue(high)
+        if self.seg_param_root.param("niter").value() != params.niter:
+            self.seg_param_root.param("niter").setValue(params.niter)
+
+    def read_preprocessing_widgets(self):
+        return {
+            "sharpen_radius": self.preprocessing_param_root.param("sharpen_radius").value(),
+            "smooth_radius": self.preprocessing_param_root.param("smooth_radius").value(),
+            "tile_norm_blocksize": self.preprocessing_param_root.param(
+                "tile_norm_blocksize"
+            ).value(),
+            "tile_norm_smooth3D": self.preprocessing_param_root.param(
+                "tile_norm_smooth3D"
+            ).value(),
+            "norm3D": self.norm3DCheckBox.isChecked(),
+            "invert": False,
+        }
+
+    def apply_preprocessing_widgets(self, params):
+        self.preprocessing_param_root.param("sharpen_radius").setValue(
+            params.sharpen_radius
+        )
+        self.preprocessing_param_root.param("smooth_radius").setValue(
+            params.smooth_radius
+        )
+        self.preprocessing_param_root.param("tile_norm_blocksize").setValue(
+            params.tile_norm_blocksize
+        )
+        self.preprocessing_param_root.param("tile_norm_smooth3D").setValue(
+            params.tile_norm_smooth3D
+        )
+        self.norm3DCheckBox.setChecked(params.norm3D)
+
+    def instance_class_filter_text(self):
+        if not hasattr(self, "InstanceClassFilter"):
+            return ""
+        return self.InstanceClassFilter.text()
 
     def make_buttons(self):
         b = 0
@@ -356,8 +409,8 @@ class MainW(QMainWindow):
         self.ModelButtonC.clicked.connect(self.run_selected_model)
         self.ModelButtonC.setEnabled(False)
 
-        self.ncells = ObservableVariable(0)
-        self.ncells.valueChanged.connect(lambda *_: self.refresh_instance_table())
+        self.ncells_counter = ObservableVariable(0)
+        self.ncells_counter.valueChanged.connect(lambda *_: self.refresh_instance_table())
 
         self.instanceBox = QGroupBox("Instances")
         self.instanceBoxV = QVBoxLayout()
@@ -533,67 +586,15 @@ class MainW(QMainWindow):
             self.get_segmentation_parameters()
         except ValueError:
             print("GUI_ERROR: normalization percentile lower must be less than upper")
-            return
 
     def get_segmentation_parameters(self):
-        params = self.view_model.get_segmentation_parameters(
-            diameter=float(self.seg_param_root.param("diameter").value()),
-            flow_threshold=float(self.seg_param_root.param("flow_threshold").value()),
-            cellprob_threshold=float(
-                self.seg_param_root.param("cellprob_threshold").value()
-            ),
-            percentile_low=float(
-                self.seg_param_root.param("norm_percentile_low").value()
-            ),
-            percentile_high=float(
-                self.seg_param_root.param("norm_percentile_high").value()
-            ),
-            niter=int(self.seg_param_root.param("niter").value()),
-        )
-        low, high = params.percentile
-
-        if self.seg_param_root.param("norm_percentile_low").value() != low:
-            self.seg_param_root.param("norm_percentile_low").setValue(low)
-        if self.seg_param_root.param("norm_percentile_high").value() != high:
-            self.seg_param_root.param("norm_percentile_high").setValue(high)
-        if self.seg_param_root.param("niter").value() != params.niter:
-            self.seg_param_root.param("niter").setValue(params.niter)
-        return params.to_dict()
+        return self.presenter.segmentation_parameters_dict()
 
     def get_preprocessing_parameters(self):
-        params = self.view_model.get_preprocessing_parameters(
-            sharpen_radius=float(
-                self.preprocessing_param_root.param("sharpen_radius").value()
-            ),
-            smooth_radius=float(
-                self.preprocessing_param_root.param("smooth_radius").value()
-            ),
-            tile_norm_blocksize=float(
-                self.preprocessing_param_root.param("tile_norm_blocksize").value()
-            ),
-            tile_norm_smooth3D=float(
-                self.preprocessing_param_root.param("tile_norm_smooth3D").value()
-            ),
-            norm3D=self.norm3DCheckBox.isChecked(),
-            image_shape=(self.Ly, self.Lx),
-            invert=False,
-        )
-        return params.to_dict()
+        return self.presenter.preprocessing_parameters_dict()
 
     def set_preprocessing_parameters(self, params):
-        self.preprocessing_param_root.param("sharpen_radius").setValue(
-            params["sharpen_radius"]
-        )
-        self.preprocessing_param_root.param("smooth_radius").setValue(
-            params["smooth_radius"]
-        )
-        self.preprocessing_param_root.param("tile_norm_blocksize").setValue(
-            params["tile_norm_blocksize"]
-        )
-        self.preprocessing_param_root.param("tile_norm_smooth3D").setValue(
-            params["tile_norm_smooth3D"]
-        )
-        self.norm3DCheckBox.setChecked(bool(params["norm3D"]))
+        self.presenter.set_preprocessing_parameters(params)
 
     def level_change(self, r):
         if self.loaded:
@@ -741,48 +742,33 @@ class MainW(QMainWindow):
         self.refresh_instance_table()
 
     def _ensure_instance_classes(self):
-        ncells = self.ncells.get()
-        current_values = getattr(self, "instance_classes", None)
-        self.instance_classes = self.view_model.ensure_instance_classes(
-            ncells, current_values=current_values
-        )
+        self.presenter.ensure_instance_classes()
+
+    @property
+    def instance_classes(self):
+        return self.presenter.instance_classes
 
     def set_instance_classes(self, instance_classes=None):
-        self.instance_classes = self.view_model.set_instance_classes(
-            self.ncells.get(), instance_classes
-        )
-        self.refresh_instance_table()
+        self.presenter.set_instance_classes(instance_classes)
 
     def instance_class_filter(self):
-        if not hasattr(self, "InstanceClassFilter"):
-            return None
-        return self.view_model.instance_class_filter(self.InstanceClassFilter.text())
+        return self.presenter.instance_class_filter()
 
     def instance_filter_changed(self):
-        self.refresh_instance_table()
-        self.draw_layer()
-        self.update_layer()
+        self.presenter.on_instance_filter_changed()
 
     def _ensure_instance_visible(self):
-        ncells = self.ncells.get()
-        current_values = getattr(self, "instance_visible", None)
-        self.instance_visible = self.view_model.ensure_instance_visible(
-            ncells, current_values=current_values
-        )
+        self.presenter.ensure_instance_visible()
+
+    @property
+    def instance_visible(self):
+        return self.presenter.instance_visible
 
     def set_instance_visible(self, instance_visible=None):
-        self.instance_visible = self.view_model.set_instance_visible(
-            self.ncells.get(), instance_visible
-        )
-        self.refresh_instance_table()
+        self.presenter.set_instance_visible(instance_visible)
 
     def visible_cell_pixels(self, cellpix):
-        filter_class_id = self.instance_class_filter()
-        self._ensure_instance_classes()
-        self._ensure_instance_visible()
-        return self.view_model.visible_cell_pixels(
-            cellpix, filter_class_id, self.instance_visible
-        )
+        return self.presenter.visible_cell_pixels(cellpix)
 
     def refresh_instance_table(self):
         if not hasattr(self, "InstanceTable"):
@@ -792,8 +778,8 @@ class MainW(QMainWindow):
         filter_class_id = self.instance_class_filter()
         self._refreshing_instance_table = True
         self.InstanceTable.blockSignals(True)
-        self.InstanceTable.setRowCount(self.ncells.get())
-        for row in range(self.ncells.get()):
+        self.InstanceTable.setRowCount(self.ncells_counter.get())
+        for row in range(self.ncells_counter.get()):
             visible_item = QTableWidgetItem()
             visible_item.setFlags(
                 QtCore.Qt.ItemFlag.ItemIsUserCheckable
@@ -838,7 +824,7 @@ class MainW(QMainWindow):
     def _sync_visibility_header_checkbox(self):
         if not hasattr(self, "_visibility_header"):
             return
-        ncells = self.ncells.get()
+        ncells = self.ncells_counter.get()
         if ncells == 0:
             self._visibility_header.set_check_state(QtCore.Qt.CheckState.Unchecked)
             return
@@ -855,15 +841,14 @@ class MainW(QMainWindow):
     def _toggle_all_instance_visibility(self, state):
         if self._refreshing_instance_table:
             return
-        ncells = self.ncells.get()
+        ncells = self.ncells_counter.get()
         if ncells == 0:
             return
-        self._ensure_instance_visible()
         if state == QtCore.Qt.CheckState.PartiallyChecked:
             visible = True
         else:
             visible = state == QtCore.Qt.CheckState.Checked
-        self.instance_visible[:ncells] = visible
+        self.presenter.set_all_instance_visible(visible, ncells)
         self._refreshing_instance_table = True
         for row in range(ncells):
             item = self.InstanceTable.item(row, 0)
@@ -875,8 +860,6 @@ class MainW(QMainWindow):
                 )
         self._refreshing_instance_table = False
         self._sync_visibility_header_checkbox()
-        self.draw_layer()
-        self.update_layer()
 
     def on_instance_table_item_changed(self, item):
         column = item.column()
@@ -893,10 +876,8 @@ class MainW(QMainWindow):
         if row >= len(self.instance_visible):
             return
         visible = item.checkState() == QtCore.Qt.CheckState.Checked
-        self.instance_visible = self.view_model.set_instance_visible_row(row, visible)
+        self.presenter.set_instance_visible_row(row, visible)
         self._sync_visibility_header_checkbox()
-        self.draw_layer()
-        self.update_layer()
 
     def set_instance_class_from_table(self, item):
         if self._refreshing_instance_table or item.column() != 2:
@@ -915,15 +896,12 @@ class MainW(QMainWindow):
             item.setText(str(old_class_id))
             self.InstanceTable.blockSignals(False)
             return
-        self.instance_classes = self.view_model.set_instance_class(row, class_id)
-        self.refresh_instance_table()
-        self.draw_layer()
-        self.update_layer()
+        self.presenter.set_instance_class(row, class_id)
         if self.loaded:
             io._save_sets_with_check(self)
 
     def toggle_saving(self):
-        if self.ncells > 0:
+        if self.ncells_counter > 0:
             self.saveSet.setEnabled(True)
             self.savePNG.setEnabled(True)
             self.saveFlows.setEnabled(True)
@@ -937,7 +915,7 @@ class MainW(QMainWindow):
             self.saveROIs.setEnabled(False)
 
     def toggle_removals(self):
-        if self.ncells > 0:
+        if self.ncells_counter > 0:
             self.ClearButton.setEnabled(True)
             self.remcell.setEnabled(True)
             self.undo.setEnabled(True)
@@ -961,8 +939,8 @@ class MainW(QMainWindow):
             self.remove_stroke()
         else:
             # remove previous cell
-            if self.ncells > 0:
-                self.remove_cell(self.ncells.get())
+            if self.ncells_counter > 0:
+                self.remove_cell(self.ncells_counter.get())
 
     def undo_remove_action(self):
         self.undo_remove_cell()
@@ -1169,7 +1147,7 @@ class MainW(QMainWindow):
         self.strokes = []
         self.stroke_appended = True
         self.resize = False
-        self.ncells.reset()
+        self.ncells_counter.reset()
         self.zdraw = []
         self.removed_cell = []
         self.cellcolors = np.array([255, 255, 255])[np.newaxis, :]
@@ -1195,7 +1173,7 @@ class MainW(QMainWindow):
         self.cellpix = np.zeros((1, self.Ly, self.Lx), np.uint16)
         self.outpix = np.zeros((1, self.Ly, self.Lx), np.uint16)
         self.ismanual = np.zeros(0, "bool")
-        self.instance_classes = np.zeros(0, dtype=np.int32)
+        self.presenter.reset_instance_metadata()
 
         # -- set menus to default -- #
         self.view = 0
@@ -1206,8 +1184,7 @@ class MainW(QMainWindow):
         self.clear_all()
 
         self.filename = []
-        self.view_model.reset_series()
-        self._sync_series_state()
+        self.presenter.reset_series()
         self.loaded = False
         self.recompute_masks = False
 
@@ -1260,9 +1237,8 @@ class MainW(QMainWindow):
             self.outpix = np.zeros((self.NZ, self.Ly, self.Lx), np.uint16)
 
         self.cellcolors = np.array([255, 255, 255])[np.newaxis, :]
-        self.instance_classes = np.zeros(0, dtype=np.int32)
-        self.instance_visible = np.zeros(0, dtype=bool)
-        self.ncells.reset()
+        self.presenter.reset_instance_metadata()
+        self.ncells_counter.reset()
         self.toggle_removals()
         self.update_scale()
         self.update_layer()
@@ -1535,10 +1511,10 @@ class MainW(QMainWindow):
         idx.sort(reverse=True)
         for i in idx:
             self.remove_single_cell(i)
-        self.ncells -= len(idx)  # _save_sets uses ncells
+        self.ncells_counter -= len(idx)  # _save_sets uses ncells
         self.update_layer()
 
-        if self.ncells == 0:
+        if self.ncells_counter == 0:
             self.ClearButton.setEnabled(False)
         if self.NZ == 1:
             io._save_sets_with_check(self)
@@ -1551,10 +1527,9 @@ class MainW(QMainWindow):
         removed_visible = True
         self._ensure_instance_classes()
         self._ensure_instance_visible()
-        if idx - 1 < len(self.instance_classes):
-            removed_class_id = int(self.instance_classes[idx - 1])
-        if idx - 1 < len(self.instance_visible):
-            removed_visible = bool(self.instance_visible[idx - 1])
+        removed_class_id, removed_visible = self.presenter.remove_instance_metadata(
+            idx - 1
+        )
         if self.NZ > 1:
             zextent = ((self.cellpix == idx).sum(axis=(1, 2)) > 0).nonzero()[0]
         else:
@@ -1591,10 +1566,6 @@ class MainW(QMainWindow):
         # remove cell from lists
         self.ismanual = np.delete(self.ismanual, idx - 1)
         self.cellcolors = np.delete(self.cellcolors, [idx], axis=0)
-        if idx - 1 < len(self.instance_classes):
-            self.instance_classes = np.delete(self.instance_classes, idx - 1)
-        if idx - 1 < len(self.instance_visible):
-            self.instance_visible = np.delete(self.instance_visible, idx - 1)
         del self.zdraw[idx - 1]
         print("GUI_INFO: removed cell %d" % (idx - 1))
 
@@ -1693,10 +1664,9 @@ class MainW(QMainWindow):
             self.cellcolors = np.append(self.cellcolors, color[np.newaxis, :], axis=0)
             self.ismanual = np.append(self.ismanual, self.removed_cell[0])
             class_id = self.removed_cell[4] if len(self.removed_cell) > 4 else 0
-            self.instance_classes = np.append(self.instance_classes, class_id)
             visible = self.removed_cell[5] if len(self.removed_cell) > 5 else True
-            self.instance_visible = np.append(self.instance_visible, visible)
-            self.ncells += 1
+            self.presenter.append_instance_metadata(class_id, visible)
+            self.ncells_counter += 1
             self.zdraw.append([])
             print(">>> added back removed cell")
             self.update_layer()
@@ -1838,7 +1808,7 @@ class MainW(QMainWindow):
             while len(self.strokes) > 0:
                 self.remove_stroke(delete_points=False)
             if len(self.current_point_set[0]) > 8:
-                color = self.colormap[self.ncells.get(), :3]
+                color = self.colormap[self.ncells_counter.get(), :3]
                 median = self.add_mask(points=self.current_point_set, color=color)
                 if median is not None:
                     self.removed_cell = []
@@ -1847,11 +1817,10 @@ class MainW(QMainWindow):
                         self.cellcolors, color[np.newaxis, :], axis=0
                     )
                     self.ismanual = np.append(self.ismanual, True)
-                    self.instance_classes = np.append(
-                        self.instance_classes, self.default_class_id()
+                    self.presenter.append_instance_metadata(
+                        self.default_class_id(), True
                     )
-                    self.instance_visible = np.append(self.instance_visible, True)
-                    self.ncells += 1
+                    self.ncells_counter += 1
                     self.draw_layer()
                     if self.NZ == 1:
                         # only save after each cell if single image
@@ -1928,7 +1897,7 @@ class MainW(QMainWindow):
     def draw_mask(self, z, ar, ac, vr, vc, color, idx=None):
         """draw single mask using outlines and area"""
         if idx is None:
-            idx = self.ncells + 1
+            idx = self.ncells_counter + 1
         self.cellpix[z, vr, vc] = idx
         self.cellpix[z, ar, ac] = idx
         self.outpix[z, vr, vc] = idx

@@ -382,3 +382,55 @@ class ImageDraw(pg.ImageItem):
         opamask = 100 * kernel[:, :, np.newaxis]
         self.redmask = np.concatenate((onmask, offmask, offmask, onmask), axis=-1)
         self.strokemask = np.concatenate((onmask, offmask, onmask, opamask), axis=-1)
+
+
+class ObservableVariable(QtCore.QObject):
+    valueChanged = QtCore.Signal(object)
+
+    def __init__(self, initial=None):
+        super().__init__()
+        self._value = initial
+
+    def set(self, new_value):
+        if new_value != self._value:
+            self._value = new_value
+            self.valueChanged.emit(new_value)
+
+    def get(self):
+        return self._value
+
+    def __call__(self):
+        return self._value
+
+    def reset(self):
+        self.set(0)
+
+    def __iadd__(self, amount):
+        if not isinstance(amount, (int, float)):
+            raise TypeError("Value must be numeric.")
+        self.set(self._value + amount)
+        return self
+
+    def __radd__(self, other):
+        return other + self._value
+
+    def __add__(self, other):
+        return other + self._value
+
+    def __isub__(self, amount):
+        if not isinstance(amount, (int, float)):
+            raise TypeError("Value must be numeric.")
+        self.set(self._value - amount)
+        return self
+
+    def __str__(self):
+        return str(self._value)
+
+    def __lt__(self, x):
+        return self._value < x
+
+    def __gt__(self, x):
+        return self._value > x
+
+    def __eq__(self, x):
+        return self._value == x

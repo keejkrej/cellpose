@@ -132,10 +132,8 @@ def _get_train_set(image_names):
 
 
 def _clear_series_state(parent):
-    if hasattr(parent, "view_model"):
-        parent.view_model.reset_series()
-        if hasattr(parent, "_sync_series_state"):
-            parent._sync_series_state()
+    if hasattr(parent, "presenter"):
+        parent.presenter.reset_series()
     else:
         parent.series_dataset = None
         parent.series_index = None
@@ -147,10 +145,8 @@ def _clear_series_state(parent):
 
 def _set_series_state(parent, dataset=None, item_index=None):
     if dataset is None or item_index is None:
-        if hasattr(parent, "view_model"):
-            parent.view_model.reset_series()
-            if hasattr(parent, "_sync_series_state"):
-                parent._sync_series_state()
+        if hasattr(parent, "presenter"):
+            parent.presenter.reset_series()
         else:
             parent.series_dataset = None
             parent.series_index = None
@@ -159,10 +155,8 @@ def _set_series_state(parent, dataset=None, item_index=None):
             parent.set_series_navigation_state()
         return
 
-    if hasattr(parent, "view_model"):
-        parent.view_model.set_series(dataset=dataset, record_index=item_index)
-        if hasattr(parent, "_sync_series_state"):
-            parent._sync_series_state()
+    if hasattr(parent, "presenter"):
+        parent.presenter.set_series(dataset=dataset, record_index=item_index)
     else:
         item = dataset["records"][item_index]
         parent.series_dataset = dataset
@@ -175,8 +169,8 @@ def _set_series_state(parent, dataset=None, item_index=None):
 
 
 def _get_output_filename(parent):
-    if hasattr(parent, "view_model"):
-        return parent.view_model.output_filename(parent.filename)
+    if hasattr(parent, "presenter"):
+        return parent.presenter.output_filename(parent.filename)
     return parent.output_filename if getattr(parent, "output_filename", None) else parent.filename
 
 
