@@ -33,9 +33,11 @@ class MainPresenter:
     def training_params(self) -> dict[str, Any]:
         return self.model.training_params
 
+    @property
     def instance_classes(self) -> np.ndarray:
         return self.model.instance_classes
 
+    @property
     def instance_visible(self) -> np.ndarray:
         return self.model.instance_visible
 

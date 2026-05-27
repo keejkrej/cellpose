@@ -839,21 +839,23 @@ class MainView(QMainWindow):
         ncells = self.ncells()
         if ncells == 0:
             return
-        if state == QtCore.Qt.CheckState.PartiallyChecked:
-            visible = True
-        else:
-            visible = state == QtCore.Qt.CheckState.Checked
-        self.presenter.set_all_instance_visible(visible, ncells)
+        # Match WinUI: only explicit unchecked hides all; partial/checked show all.
+        visible = state != QtCore.Qt.CheckState.Unchecked
         self._refreshing_instance_table = True
-        for row in range(ncells):
-            item = self.InstanceTable.item(row, 0)
-            if item is not None:
-                item.setCheckState(
-                    QtCore.Qt.CheckState.Checked
-                    if visible
-                    else QtCore.Qt.CheckState.Unchecked
-                )
-        self._refreshing_instance_table = False
+        self.InstanceTable.blockSignals(True)
+        try:
+            self.presenter.set_all_instance_visible(visible, ncells)
+            for row in range(ncells):
+                item = self.InstanceTable.item(row, 0)
+                if item is not None:
+                    item.setCheckState(
+                        QtCore.Qt.CheckState.Checked
+                        if visible
+                        else QtCore.Qt.CheckState.Unchecked
+                    )
+        finally:
+            self.InstanceTable.blockSignals(False)
+            self._refreshing_instance_table = False
         self._sync_visibility_header_checkbox()
 
     def on_instance_table_item_changed(self, item):

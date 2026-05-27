@@ -23,12 +23,22 @@ import pyqtgraph as pg
 Horizontal = QtCore.Qt.Orientation.Horizontal
 
 
+class TristateHeaderCheckBox(QCheckBox):
+    """Tristate for sync display; user clicks toggle only checked/unchecked."""
+
+    def nextCheckState(self):
+        if self.checkState() == QtCore.Qt.CheckState.Checked:
+            self.setCheckState(QtCore.Qt.CheckState.Unchecked)
+        else:
+            self.setCheckState(QtCore.Qt.CheckState.Checked)
+
+
 class CheckBoxHeader(QHeaderView):
     checkboxClicked = QtCore.Signal(int)
 
     def __init__(self, orientation, parent=None):
         super().__init__(orientation, parent)
-        self._checkbox = QCheckBox(self)
+        self._checkbox = TristateHeaderCheckBox(self)
         self._checkbox.setTristate(True)
         self._checkbox.setToolTip("Show or hide all cell masks and outlines")
         self._checkbox.stateChanged.connect(self.checkboxClicked.emit)
