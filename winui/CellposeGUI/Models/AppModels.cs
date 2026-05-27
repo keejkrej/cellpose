@@ -353,6 +353,61 @@ public sealed class InstanceClasses
             return null;
         return int.TryParse(trimmed, out var value) && value >= 0 ? value : null;
     }
+
+    public static bool IsLabelVisible(
+        int label,
+        IReadOnlyList<int> classes,
+        IReadOnlyList<bool> visibility,
+        int? filterClassId)
+    {
+        if (label <= 0)
+            return false;
+
+        var row = label - 1;
+        if (row < visibility.Count && !visibility[row])
+            return false;
+
+        if (filterClassId == null)
+            return true;
+
+        return row < classes.Count && classes[row] == filterClassId.Value;
+    }
+}
+
+public sealed class InstanceVisibility
+{
+    public List<bool> Values { get; private set; } = [];
+
+    public void Replace(int ncells, IReadOnlyList<bool>? loaded = null)
+    {
+        var result = new bool[ncells];
+        if (loaded != null)
+        {
+            var n = Math.Min(ncells, loaded.Count);
+            for (var i = 0; i < n; i++)
+                result[i] = loaded[i];
+        }
+        else
+        {
+            var n = Math.Min(ncells, Values.Count);
+            for (var i = 0; i < n; i++)
+                result[i] = Values[i];
+            for (var i = n; i < ncells; i++)
+                result[i] = true;
+        }
+
+        Values = [.. result];
+    }
+
+    public void SetVisible(int row, bool visible)
+    {
+        if (row < 0 || row >= Values.Count)
+            return;
+        Values[row] = visible;
+    }
+
+    public void SetAll(int ncells, bool visible) =>
+        Values = Enumerable.Repeat(visible, ncells).ToList();
 }
 
 public enum ViewMode

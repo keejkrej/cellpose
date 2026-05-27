@@ -1,4 +1,5 @@
 using CellposeGUI.ViewModels;
+using CommunityToolkit.WinUI.UI.Controls;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 
@@ -38,8 +39,20 @@ public sealed partial class RightSidebarView : UserControl
 
     private void OnViewModelPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
     {
-        if (e.PropertyName == nameof(MainViewModel.Ncells))
-            RefreshInstanceGrid();
+        switch (e.PropertyName)
+        {
+            case nameof(MainViewModel.Ncells):
+            case nameof(MainViewModel.ClassFilterText):
+            case nameof(MainViewModel.InstanceRowsRevision):
+                RefreshInstanceGrid();
+                break;
+        }
+    }
+
+    private void InstanceGrid_LoadingRow(object sender, DataGridRowEventArgs e)
+    {
+        if (e.Row.DataContext is InstanceRowViewModel row)
+            e.Row.Visibility = row.IsHiddenByFilter ? Visibility.Collapsed : Visibility.Visible;
     }
 
     private void RefreshInstanceGrid()

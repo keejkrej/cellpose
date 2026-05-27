@@ -211,7 +211,7 @@ public sealed class ImageCanvasControl : Grid
                 var label = viewModel.ShowOutlines
                     ? masks.OutlineLabels?[y * masks.Width + x] ?? 0
                     : masks.LabelAt(x, y);
-                if (label <= 0)
+                if (label <= 0 || !viewModel.IsInstanceLabelVisible(label))
                     continue;
 
                 var color = masks.ColorAt(x, y);

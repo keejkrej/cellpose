@@ -74,6 +74,7 @@ public sealed class MainViewModel : ObservableObject
         SeriesState = new SeriesState();
         SeriesState.BindDispatcher(dispatcher);
         InstanceClasses = new InstanceClasses();
+        InstanceVisibility = new InstanceVisibility();
     }
 
 
@@ -193,6 +194,36 @@ public sealed class MainViewModel : ObservableObject
     public TrainingParameters TrainingParams { get; }
     public SeriesState SeriesState { get; }
     public InstanceClasses InstanceClasses { get; }
+    public InstanceVisibility InstanceVisibility { get; }
+
+    public bool? AllInstancesVisible
+    {
+        get
+        {
+            if (_ncells == 0)
+                return false;
+
+            var visibleCount = 0;
+            for (var row = 0; row < _ncells; row++)
+            {
+                if (row < InstanceVisibility.Values.Count && InstanceVisibility.Values[row])
+                    visibleCount++;
+            }
+
+            if (visibleCount == 0)
+                return false;
+            if (visibleCount == _ncells)
+                return true;
+            return null;
+        }
+        set
+        {
+            if (_ncells == 0)
+                return;
+
+            SetAllInstanceVisible(value != false);
+        }
+    }
 
     public string ClassFilterText
     {
@@ -201,6 +232,7 @@ public sealed class MainViewModel : ObservableObject
         {
             SetProperty(ref _classFilterText, value);
             Notify(nameof(FilteredCellCount));
+            NotifyCanvasChanged();
         }
     }
 
@@ -271,6 +303,8 @@ public sealed class MainViewModel : ObservableObject
         }
     }
 
+    public int InstanceRowsRevision { get; private set; }
+
     public void ApplyLoadedImage(string path, ImageData image)
     {
         if (!_dispatcher.HasThreadAccess)
@@ -293,6 +327,7 @@ public sealed class MainViewModel : ObservableObject
         RecomputeMasks = false;
         SelectedCell = 0;
         InstanceClasses.Replace(0);
+        InstanceVisibility.Replace(0);
         Progress = 1;
         ImageLoaded = true;
         UpdateSaturationFromImage();
@@ -322,6 +357,7 @@ public sealed class MainViewModel : ObservableObject
         Ncells = loaded.Masks.Labels.Length == 0 ? 0 : loaded.Masks.Labels.Max();
         RecomputeMasks = loaded.RecomputeMasks;
         InstanceClasses.Replace(Ncells);
+        InstanceVisibility.Replace(Ncells);
         SelectedCell = 0;
         Progress = 1;
         ImageLoaded = true;
@@ -341,6 +377,7 @@ public sealed class MainViewModel : ObservableObject
         Masks = masks;
         Ncells = masks.Labels.Length == 0 ? 0 : masks.Labels.Max();
         InstanceClasses.Replace(Ncells);
+        InstanceVisibility.Replace(Ncells);
         NotifyCanvasChanged();
     }
 
@@ -385,6 +422,29 @@ public sealed class MainViewModel : ObservableObject
     public int CanvasRevision { get; private set; }
 
     public void NotifyCanvasChanged() => Notify(nameof(CanvasRevision));
+
+    public bool IsInstanceLabelVisible(int label) =>
+        InstanceClasses.IsLabelVisible(
+            label,
+            InstanceClasses.Values,
+            InstanceVisibility.Values,
+            InstanceClasses.ParseFilter(_classFilterText));
+
+    public void SetInstanceVisible(int row, bool visible)
+    {
+        InstanceVisibility.SetVisible(row, visible);
+        Notify(nameof(AllInstancesVisible));
+        NotifyCanvasChanged();
+    }
+
+    public void SetAllInstanceVisible(bool visible)
+    {
+        InstanceVisibility.SetAll(_ncells, visible);
+        InstanceRowsRevision++;
+        Notify(nameof(InstanceRowsRevision));
+        Notify(nameof(AllInstancesVisible));
+        NotifyCanvasChanged();
+    }
 
     public async Task RefreshModelsAsync()
     {

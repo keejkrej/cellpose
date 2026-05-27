@@ -96,8 +96,19 @@
                         CanUserSortColumns="False"
                         GridLinesVisibility="Horizontal"
                         HeadersVisibility="Column"
-                        SelectionMode="Extended">
+                        SelectionMode="Extended"
+                        LoadingRow="InstanceGrid_LoadingRow">
                         <controls:DataGrid.Columns>
+                            <controls:DataGridCheckBoxColumn
+                                Width="40"
+                                Binding="{Binding Visible, Mode=TwoWay}">
+                                <controls:DataGridCheckBoxColumn.Header>
+                                    <CheckBox
+                                        HorizontalAlignment="Center"
+                                        IsThreeState="True"
+                                        IsChecked="{x:Bind ViewModel.AllInstancesVisible, Mode=TwoWay}" />
+                                </controls:DataGridCheckBoxColumn.Header>
+                            </controls:DataGridCheckBoxColumn>
                             <controls:DataGridTextColumn
                                 Header="ROI"
                                 Width="60"
