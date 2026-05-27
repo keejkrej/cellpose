@@ -43,7 +43,9 @@
         <Grid Grid.Row="1" ColumnDefinitions="320,*,380">
             <local:LeftSidebarView x:Name="LeftSidebar" Grid.Column="0" HorizontalAlignment="Stretch" />
             <Grid Grid.Column="1" RowDefinitions="*,Auto">
-                <rendering:ImageCanvasControl x:Name="Canvas" Grid.Row="0" />
+                <Grid Grid.Row="0">
+                    <rendering:ImageCanvasControl x:Name="Canvas" />
+                </Grid>
                 <Grid Grid.Row="1" Padding="12,6" Background="{ThemeResource LayerFillColorDefaultBrush}">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*" />

@@ -28,7 +28,7 @@ def train(request: TrainRequest) -> dict:
         [
             os.path.join(folder, name)
             for name in os.listdir(folder)
-            if name.lower().endswith((".tif", ".tiff", ".png", ".jpg", ".jpeg", ".npy"))
+            if name.lower().endswith((".tif", ".tiff", ".png", ".jpg", ".jpeg"))
         ]
     )
     train_data, train_labels, train_files, _, _ = gui_io._get_train_set(image_names)

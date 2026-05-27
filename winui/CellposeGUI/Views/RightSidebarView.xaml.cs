@@ -43,10 +43,6 @@ public sealed partial class RightSidebarView : UserControl
         switch (e.PropertyName)
         {
             case nameof(MainViewModel.Models):
-            case nameof(MainViewModel.Progress):
-            case nameof(MainViewModel.IsBusy):
-            case nameof(MainViewModel.CanRunSegmentation):
-            case nameof(MainViewModel.RunProgressOpacity):
                 RefreshSegmentationGrid();
                 break;
             case nameof(MainViewModel.Ncells):

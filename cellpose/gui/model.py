@@ -322,12 +322,14 @@ class DrawingState:
     current_point_set: list[Any] = field(default_factory=list)
     in_stroke: bool = False
     stroke_appended: bool = True
+    brush_mode: bool = False
 
     def reset(self) -> None:
         self.strokes = []
         self.current_point_set = []
         self.in_stroke = False
         self.stroke_appended = True
+        self.brush_mode = False
 
 
 class MainModel:
@@ -756,3 +758,64 @@ class MainModel:
         if len(self.instances.values) > 0:
             dat["instance_classes"] = self.instances.values
         return dat
+
+    def to_session_data(
+        self,
+        *,
+        source_image: str,
+        model: str = "cpsam",
+        segmentation_params: dict[str, Any] | None = None,
+        recompute_masks: bool = False,
+    ) -> "SessionData":
+        from cellpose.gui.session_format.models import SessionData, SegmentationMetadata
+
+        session = self.session
+        segmentation_params = segmentation_params or self.segmentation_params or {}
+        use_resize = session.restore is not None and "upsample" in session.restore
+        if session.nz > 1:
+            masks = np.asarray(session.cellpix)
+        else:
+            masks = np.asarray(
+                session.cellpix_resize.squeeze()
+                if use_resize
+                else session.cellpix.squeeze()
+            )
+
+        flows_list = None
+        if session.flows:
+            try:
+                flows_list = [np.asarray(flow) for flow in session.flows]
+            except TypeError:
+                flows_list = None
+
+        colors = None
+        if len(session.cellcolors) > 1:
+            colors = np.asarray(session.cellcolors[1:], dtype=np.uint8)
+
+        instance_classes = None
+        if len(self.instances.values) > 0:
+            instance_classes = np.asarray(self.instances.values, dtype=np.int32)
+
+        ismanual = None
+        if session.nz == 1 and len(session.ismanual) > 0:
+            ismanual = np.asarray(session.ismanual, dtype=bool)
+
+        seg = SegmentationMetadata(
+            flow_threshold=float(segmentation_params.get("flow_threshold", 0.4)),
+            cellprob_threshold=float(segmentation_params.get("cellprob_threshold", 0.0)),
+            diameter=segmentation_params.get("diameter"),
+            niter=int(segmentation_params.get("niter", 200)),
+            min_size=int(segmentation_params.get("min_size", 15)),
+        )
+
+        return SessionData(
+            source_image=source_image,
+            masks=masks,
+            flows=flows_list,
+            colors=colors,
+            instance_classes=instance_classes,
+            ismanual=ismanual,
+            model=model,
+            recompute_masks=bool(recompute_masks),
+            segmentation=seg,
+        )

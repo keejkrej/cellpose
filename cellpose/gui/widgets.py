@@ -221,7 +221,8 @@ class ImageDraw(pg.ImageItem):
             return
         if self.parent.loaded and not self.parent.removing_region:
             if (
-                ev.modifiers() & QtCore.Qt.ShiftModifier
+                self.parent.brush_mode
+                and ev.button() == QtCore.Qt.LeftButton
                 and not ev.double()
                 and not self.parent.deleting_multiple
                 and not self.parent.rect_select_mode
@@ -234,6 +235,7 @@ class ImageDraw(pg.ImageItem):
                     self.drawAt(ev.pos(), ev)
                 else:
                     ev.accept()
+                    self.drawAt(ev.pos(), ev)
                     self.end_stroke()
                     self.parent.in_stroke = False
             elif not self.parent.in_stroke:

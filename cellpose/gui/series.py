@@ -122,7 +122,7 @@ def _sort_key(value: str) -> tuple[int, int | str]:
 
 def _is_supported_series_file(path: Path) -> bool:
     return path.suffix.lower() in SUPPORTED_SERIES_SUFFIXES and not path.name.endswith(
-        ("_seg.npy", "_seg.cellpose")
+        "_seg.cellpose"
     )
 
 

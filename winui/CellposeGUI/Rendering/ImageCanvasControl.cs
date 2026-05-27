@@ -26,7 +26,9 @@ public sealed class ImageCanvasControl : Grid
     private MainViewModel? _viewModel;
     private double _zoom = 1;
     private Point _panOffset;
-    private bool _isDraggingStroke;
+    private bool _isPanning;
+    private Point _panStart;
+    private Point _panOffsetStart;
 
     public ImageCanvasControl()
     {
@@ -35,8 +37,10 @@ public sealed class ImageCanvasControl : Grid
         Background = new SolidColorBrush(Microsoft.UI.Colors.Black);
         Children.Add(_canvas);
         _canvas.Children.Add(_imageControl);
+        Loaded += (_, _) => UpdateClip();
         SizeChanged += (_, _) =>
         {
+            UpdateClip();
             if (_viewModel?.Image is { } image)
                 UpdateImageLayout(image.Width, image.Height);
         };
@@ -83,7 +87,7 @@ public sealed class ImageCanvasControl : Grid
         set
         {
             _zoom = Math.Clamp(value, 0.1, 20);
-            Redraw();
+            UpdateViewport();
             ZoomChanged?.Invoke(this, _zoom);
         }
     }
@@ -92,6 +96,13 @@ public sealed class ImageCanvasControl : Grid
 
     private void OnViewModelPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
     {
+        if (e.PropertyName is nameof(MainViewModel.Image))
+        {
+            _zoom = 1;
+            _panOffset = default;
+            ZoomChanged?.Invoke(this, _zoom);
+        }
+
         if (e.PropertyName is nameof(MainViewModel.Image) or
             nameof(MainViewModel.Masks) or
             nameof(MainViewModel.ShowMasks) or
@@ -160,6 +171,28 @@ public sealed class ImageCanvasControl : Grid
             DrawMaskOverlay(_bitmap, _viewModel);
 
         _imageControl.Source = _bitmap;
+        UpdateViewport();
+    }
+
+    private void UpdateClip()
+    {
+        if (ActualWidth <= 0 || ActualHeight <= 0)
+        {
+            Clip = null;
+            return;
+        }
+
+        Clip = new RectangleGeometry
+        {
+            Rect = new Rect(0, 0, ActualWidth, ActualHeight),
+        };
+    }
+
+    private void UpdateViewport()
+    {
+        if (_viewModel?.Image is not { } image)
+            return;
+
         UpdateImageLayout(image.Width, image.Height);
     }
 
@@ -276,65 +309,78 @@ public sealed class ImageCanvasControl : Grid
     {
         Focus(FocusState.Programmatic);
         var point = e.GetCurrentPoint(this);
-        if (point.Properties.IsRightButtonPressed)
+
+        if (point.Properties.IsMiddleButtonPressed ||
+            (point.Properties.IsRightButtonPressed && _viewModel?.BrushMode != true))
+        {
+            _isPanning = true;
+            _panStart = point.Position;
+            _panOffsetStart = _panOffset;
+            CapturePointer(e.Pointer);
             return;
+        }
 
         if (ImagePointFromPointer(point.Position) is not Point imagePoint || _viewModel == null)
             return;
 
-        var shiftDown = InputKeyboardSource.GetKeyStateForCurrentThread(VirtualKey.Shift).HasFlag(Windows.UI.Core.CoreVirtualKeyStates.Down);
+        if (_viewModel.BrushMode && point.Properties.IsLeftButtonPressed)
+        {
+            if (_viewModel.InStroke)
+            {
+                _ = _viewModel.CompleteStrokeAsync((int)imagePoint.X, (int)imagePoint.Y);
+            }
+            else
+            {
+                _viewModel.BeginStroke((int)imagePoint.X, (int)imagePoint.Y);
+            }
+
+            return;
+        }
+
         var controlDown = InputKeyboardSource.GetKeyStateForCurrentThread(VirtualKey.Control).HasFlag(Windows.UI.Core.CoreVirtualKeyStates.Down);
         var altDown = InputKeyboardSource.GetKeyStateForCurrentThread(VirtualKey.Menu).HasFlag(Windows.UI.Core.CoreVirtualKeyStates.Down);
 
-        if (shiftDown)
-        {
-            _isDraggingStroke = true;
-            _viewModel.BeginStroke((int)imagePoint.X, (int)imagePoint.Y);
-        }
-        else
-        {
-            _viewModel.RemoveCellAt((int)imagePoint.X, (int)imagePoint.Y, controlDown, altDown);
-        }
-
+        _viewModel.RemoveCellAt((int)imagePoint.X, (int)imagePoint.Y, controlDown, altDown);
         CapturePointer(e.Pointer);
     }
 
     private void OnPointerMoved(object sender, PointerRoutedEventArgs e)
     {
-        if (!_isDraggingStroke || _viewModel == null)
-            return;
-
         var point = e.GetCurrentPoint(this);
-        if (ImagePointFromPointer(point.Position) is Point imagePoint)
-            _viewModel.ContinueStroke((int)imagePoint.X, (int)imagePoint.Y);
-    }
 
-    private async void OnPointerReleased(object sender, PointerRoutedEventArgs e)
-    {
-        if (_isDraggingStroke && _viewModel != null)
+        if (_isPanning)
         {
-            _viewModel.CommitStroke();
-            await _viewModel.FinishDrawingAsync();
+            _panOffset = new Point(
+                _panOffsetStart.X + (point.Position.X - _panStart.X),
+                _panOffsetStart.Y + (point.Position.Y - _panStart.Y));
+            UpdateViewport();
+            return;
         }
 
-        _isDraggingStroke = false;
+        if (_viewModel?.BrushMode == true && _viewModel.InStroke &&
+            ImagePointFromPointer(point.Position) is Point hoverPoint)
+        {
+            _viewModel.ContinueStroke((int)hoverPoint.X, (int)hoverPoint.Y);
+        }
+    }
+
+    private void OnPointerReleased(object sender, PointerRoutedEventArgs e)
+    {
+        if (_isPanning)
+        {
+            _isPanning = false;
+            ReleasePointerCapture(e.Pointer);
+            return;
+        }
+
         ReleasePointerCapture(e.Pointer);
     }
 
     private void OnPointerWheelChanged(object sender, PointerRoutedEventArgs e)
     {
-        var point = e.GetCurrentPoint(this);
-        var controlDown = InputKeyboardSource.GetKeyStateForCurrentThread(VirtualKey.Control).HasFlag(Windows.UI.Core.CoreVirtualKeyStates.Down);
-        if (controlDown)
-        {
-            _panOffset = new Point(_panOffset.X + point.Properties.MouseWheelDelta / 4.0, _panOffset.Y);
-            Redraw();
-        }
-        else
-        {
-            var delta = point.Properties.MouseWheelDelta;
-            Zoom = delta > 0 ? Zoom * 1.1 : Zoom / 1.1;
-        }
+        var delta = e.GetCurrentPoint(this).Properties.MouseWheelDelta;
+        Zoom = delta > 0 ? Zoom * 1.1 : Zoom / 1.1;
+        e.Handled = true;
     }
 
     private async void OnKeyDown(object sender, KeyRoutedEventArgs e)

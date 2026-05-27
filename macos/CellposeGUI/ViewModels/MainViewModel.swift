@@ -33,6 +33,8 @@ final class MainViewModel {
     var instanceClasses = InstanceClasses()
     var classFilterText = ""
     var defaultClassID: Int32 = 0
+    var brushMode = false
+    var inStroke = false
     var viewMode: ViewMode = .image
 
     var models: [String] = ["CPSAM"]
@@ -505,16 +507,37 @@ final class MainViewModel {
 
     func beginStroke(at x: Int, y: Int, z: Int = 0) {
         currentStroke = [[Double(z), Double(y), Double(x), 0]]
+        pendingStrokes = []
+        inStroke = true
     }
 
     func continueStroke(at x: Int, y: Int, z: Int = 0) {
+        guard inStroke, !currentStroke.isEmpty else { return }
+        let last = currentStroke[currentStroke.count - 1]
+        if Int(last[1]) == y, Int(last[2]) == x {
+            return
+        }
         currentStroke.append([Double(z), Double(y), Double(x), 0])
     }
 
-    func commitStroke() async {
+    func cancelStroke() {
+        currentStroke = []
+        pendingStrokes = []
+        inStroke = false
+    }
+
+    func commitStroke() {
         guard !currentStroke.isEmpty else { return }
         pendingStrokes.append(currentStroke)
         currentStroke = []
+    }
+
+    func completeStroke(at x: Int, y: Int, z: Int = 0) async {
+        guard inStroke else { return }
+        continueStroke(at: x, y: y, z: z)
+        commitStroke()
+        inStroke = false
+        await finishDrawing()
     }
 
     func finishDrawing() async {
@@ -529,7 +552,7 @@ final class MainViewModel {
                 strokes: strokes,
                 classID: self.defaultClassID
             ) else {
-                throw SidecarError.serverError("Could not add mask from stroke")
+                return
             }
             self.applyMaskUpdate(updated)
             self.saveSessionIfNeeded()

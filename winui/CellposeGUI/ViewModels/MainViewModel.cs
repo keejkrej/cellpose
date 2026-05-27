@@ -34,7 +34,9 @@ public sealed class MainViewModel : ObservableObject
     private bool _disableAutosave;
     private bool _imageLoaded;
     private bool _isBusy;
+    private bool _isSegmentationRunning;
     private double _progress;
+    private double _segmentationProgress;
     private string _statusMessage = "Ready";
     private string? _errorMessage;
     private bool _recomputeMasks;
@@ -42,6 +44,8 @@ public sealed class MainViewModel : ObservableObject
     private int _selectedModelIndex;
     private string _classFilterText = "";
     private int _defaultClassId;
+    private bool _brushMode;
+    private bool _inStroke;
     private List<string> _models = ["CPSAM"];
 
     public MainViewModel(
@@ -159,11 +163,27 @@ public sealed class MainViewModel : ObservableObject
         {
             SetProperty(ref _isBusy, value);
             Notify(nameof(CanRunSegmentation));
-            Notify(nameof(RunProgressOpacity));
         }
     }
 
-    public double RunProgressOpacity => _isBusy ? 1 : 0;
+    public bool IsSegmentationRunning
+    {
+        get => _isSegmentationRunning;
+        private set
+        {
+            SetProperty(ref _isSegmentationRunning, value);
+            Notify(nameof(SegmentationProgressOpacity));
+            Notify(nameof(CanRunSegmentation));
+        }
+    }
+
+    public double SegmentationProgressOpacity => _isSegmentationRunning ? 1 : 0;
+
+    public double SegmentationProgress
+    {
+        get => _segmentationProgress;
+        private set => SetProperty(ref _segmentationProgress, value);
+    }
 
     public double Progress
     {
@@ -242,6 +262,22 @@ public sealed class MainViewModel : ObservableObject
         set => SetProperty(ref _defaultClassId, value);
     }
 
+    public bool BrushMode
+    {
+        get => _brushMode;
+        set
+        {
+            if (_brushMode == value)
+                return;
+
+            SetProperty(ref _brushMode, value);
+            if (!value)
+                CancelStroke();
+        }
+    }
+
+    public bool InStroke => _inStroke;
+
     public ViewMode ViewMode
     {
         get => _viewMode;
@@ -283,7 +319,7 @@ public sealed class MainViewModel : ObservableObject
         _selectedModelIndex > 0 && _models.FirstOrDefault()?.Equals("CPSAM", StringComparison.OrdinalIgnoreCase) == true;
 
     public bool CanSaveMasks => _imageLoaded && _ncells > 0;
-    public bool CanRunSegmentation => _imageLoaded && !_isBusy;
+    public bool CanRunSegmentation => _imageLoaded && !_isBusy && !_isSegmentationRunning;
 
     public string WindowTitle =>
         _filename != null ? Path.GetFileName(_filename) : "Cellpose";
@@ -649,17 +685,26 @@ public sealed class MainViewModel : ObservableObject
 
         await RunTaskAsync("Running segmentation…", async () =>
         {
-            Progress = 0.1;
-            var result = await _ml.InferAsync(
-                _session.ImagePath,
-                SelectedModel,
-                IsCustomModel,
-                SegmentationParams);
-            Progress = 1;
-            ApplyInferenceResult(result);
-            StatusMessage = $"Found {result.Ncells} cells";
-            SaveSessionIfNeeded();
-        }, showProgress: true);
+            IsSegmentationRunning = true;
+            SegmentationProgress = 0;
+            try
+            {
+                SegmentationProgress = 0.1;
+                var result = await _ml.InferAsync(
+                    _session.ImagePath,
+                    SelectedModel,
+                    IsCustomModel,
+                    SegmentationParams);
+                SegmentationProgress = 1;
+                ApplyInferenceResult(result);
+                StatusMessage = $"Found {result.Ncells} cells";
+                SaveSessionIfNeeded();
+            }
+            finally
+            {
+                IsSegmentationRunning = false;
+            }
+        });
     }
 
     public async Task RecomputeFromThresholdsAsync()
@@ -853,18 +898,54 @@ public sealed class MainViewModel : ObservableObject
     public void BeginStroke(int x, int y, int z = 0)
     {
         _currentStroke.Clear();
+        _pendingStrokes.Clear();
+        _currentStroke.Add([z, y, x, 0]);
+        _inStroke = true;
+        Notify(nameof(InStroke));
+    }
+
+    public void ContinueStroke(int x, int y, int z = 0)
+    {
+        if (!_inStroke || _currentStroke.Count == 0)
+            return;
+
+        var last = _currentStroke[^1];
+        if ((int)last[1] == y && (int)last[2] == x)
+            return;
+
         _currentStroke.Add([z, y, x, 0]);
     }
 
-    public void ContinueStroke(int x, int y, int z = 0) =>
-        _currentStroke.Add([z, y, x, 0]);
+    public void CancelStroke()
+    {
+        _currentStroke.Clear();
+        _pendingStrokes.Clear();
+        if (!_inStroke)
+            return;
+
+        _inStroke = false;
+        Notify(nameof(InStroke));
+    }
 
     public void CommitStroke()
     {
         if (_currentStroke.Count == 0)
             return;
+
         _pendingStrokes.Add(_currentStroke.ToArray());
         _currentStroke.Clear();
+    }
+
+    public async Task CompleteStrokeAsync(int x, int y, int z = 0)
+    {
+        if (!_inStroke)
+            return;
+
+        ContinueStroke(x, y, z);
+        CommitStroke();
+        _inStroke = false;
+        Notify(nameof(InStroke));
+        await FinishDrawingAsync();
     }
 
     public Task FinishDrawingAsync()
@@ -885,7 +966,8 @@ public sealed class MainViewModel : ObservableObject
                 strokes,
                 _defaultClassId);
             if (updated == null)
-                throw new SidecarException("Cell too small to draw");
+                return;
+
             ApplyMaskUpdate(updated);
             SaveSessionIfNeeded();
         });

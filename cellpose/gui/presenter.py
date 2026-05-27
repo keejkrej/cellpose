@@ -542,29 +542,32 @@ class MainPresenter:
     def save_sets(self) -> None:
         import os
 
+        from cellpose.gui.session_format import write_session
+
         filename = self.output_filename(str(self.view.filename))
         base = os.path.splitext(filename)[0]
+        path = base + "_seg.cellpose"
         segmentation_params = self.segmentation_parameters_dict()
         normalize_params = self.view.get_normalize_params()
         self.model.segmentation_params = segmentation_params
         self.model.preprocessing_params = normalize_params
-        dat = self.model.to_seg_dict(
-            current_model_path=getattr(self.view, "current_model_path", 0),
-            normalize_params=normalize_params,
+
+        model_name = "cpsam"
+        if hasattr(self.view, "ModelChooseC"):
+            model_name = self.view.ModelChooseC.currentText().lower()
+
+        source_image = str(self.view.filename) if self.view.filename else filename
+        session_data = self.model.to_session_data(
+            source_image=source_image,
+            model=model_name,
             segmentation_params=segmentation_params,
+            recompute_masks=bool(getattr(self.view, "recompute_masks", False)),
         )
-        if (
-            getattr(self.view, "series_dataset", None) is not None
-            and self.view.series_index is not None
-        ):
-            dat["image_series"] = series.build_series_metadata(
-                self.view.series_dataset, self.view.series_index
-            )
         try:
-            np.save(base + "_seg.npy", dat)
+            written = write_session(path, session_data)
             print(
                 "GUI_INFO: %d ROIs saved to %s"
-                % (self.view.ncells(), base + "_seg.npy")
+                % (self.view.ncells(), written)
             )
         except Exception as e:
             print(f"ERROR: {e}")

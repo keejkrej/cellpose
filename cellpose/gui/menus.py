@@ -24,7 +24,7 @@ def mainmenu(parent):
     parent.autoloadMasks.setChecked(False)
     file_menu.addAction(parent.autoloadMasks)
 
-    parent.disableAutosave = QAction("Disable autosave _seg.npy file", parent,
+    parent.disableAutosave = QAction("Disable autosave _seg.cellpose file", parent,
                                      checkable=True)
     parent.disableAutosave.setChecked(False)
     file_menu.addAction(parent.disableAutosave)
@@ -35,12 +35,12 @@ def mainmenu(parent):
     file_menu.addAction(parent.loadMasks)
     parent.loadMasks.setEnabled(False)
 
-    loadManual = QAction("Load &processed/labelled image (*_seg.npy)", parent)
+    loadManual = QAction("Load &processed/labelled image (*_seg.cellpose)", parent)
     loadManual.setShortcut("Ctrl+P")
     loadManual.triggered.connect(lambda: io._load_seg(parent))
     file_menu.addAction(loadManual)
 
-    parent.saveSet = QAction("&Save masks and image (as *_seg.npy)", parent)
+    parent.saveSet = QAction("&Save masks and image (as *_seg.cellpose)", parent)
     parent.saveSet.setShortcut("Ctrl+S")
     parent.saveSet.triggered.connect(lambda: io._save_sets(parent))
     file_menu.addAction(parent.saveSet)

@@ -51,6 +51,14 @@ struct LeftSidebarView: View {
                 }
 
                 SidebarPanel(title: "Drawing") {
+                    Toggle("brush", isOn: $viewModel.brushMode)
+                        .toggleStyle(.button)
+                        .disabled(!viewModel.imageLoaded)
+                        .onChange(of: viewModel.brushMode) { _, enabled in
+                            if !enabled {
+                                viewModel.cancelStroke()
+                            }
+                        }
                     HStack {
                         Text("default class")
                         TextField("0", value: $viewModel.defaultClassID, format: .number)

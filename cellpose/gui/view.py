@@ -115,6 +115,7 @@ _MODEL_ATTR_MAP: dict[str, tuple[str, str] | None] = {
     "current_point_set": ("drawing", "current_point_set"),
     "in_stroke": ("drawing", "in_stroke"),
     "stroke_appended": ("drawing", "stroke_appended"),
+    "brush_mode": ("drawing", "brush_mode"),
     "filename": None,
     "display_filename": None,
     "output_filename": None,
@@ -445,6 +446,14 @@ class MainView(QMainWindow):
         default_class_layout.addWidget(default_class_label)
         default_class_layout.addWidget(self.DefaultClassEdit)
         self.drawBoxV.addLayout(default_class_layout)
+
+        self.BrushButton = QPushButton("brush")
+        self.BrushButton.setCheckable(True)
+        self.BrushButton.setToolTip(
+            "Toggle brush mode: click to start drawing, move to draw, then click again to finish"
+        )
+        self.BrushButton.toggled.connect(self.toggle_brush_mode)
+        self.drawBoxV.addWidget(self.BrushButton)
 
         select_layout = QHBoxLayout()
         self.RectSelectButton = QPushButton("select")
@@ -1015,7 +1024,7 @@ class MainView(QMainWindow):
 
     def dropEvent(self, event):
         files = [u.toLocalFile() for u in event.mimeData().urls()]
-        if os.path.splitext(files[0])[-1] == ".npy":
+        if os.path.splitext(files[0])[-1] == ".cellpose":
             io._load_seg(self, filename=files[0], load_3D=self.load_3D)
         else:
             io._load_image(self, filename=files[0], load_seg=True, load_3D=self.load_3D)
@@ -1056,6 +1065,9 @@ class MainView(QMainWindow):
         self.in_stroke = False
         self.strokes = []
         self.stroke_appended = True
+        self.brush_mode = False
+        if hasattr(self, "BrushButton"):
+            self.BrushButton.setChecked(False)
         self.resize = False
         self.ncells_counter.reset()
         self.zdraw = []
@@ -1292,6 +1304,18 @@ class MainView(QMainWindow):
         self.prev_selected = self.selected
         self._sync_instance_table_selection_multi(cells)
         self._update_selection_boxes()
+
+    def toggle_brush_mode(self, enabled):
+        self.brush_mode = enabled
+        if enabled or not self.in_stroke:
+            return
+
+        if hasattr(self.layer, "scatter"):
+            self.p0.removeItem(self.layer.scatter)
+        self.in_stroke = False
+        self.current_stroke = []
+        self.stroke_appended = True
+        self.draw_layer()
 
     def toggle_rect_select_mode(self, enabled):
         self.rect_select_mode = enabled
@@ -2009,7 +2033,7 @@ class MainView(QMainWindow):
                 QMessageBox.warning(
                     self,
                     "Train",
-                    "No valid training images with _seg.npy found in folder.",
+                    "No valid training images with _seg.cellpose found in folder.",
                 )
                 return
             self.logger.info(

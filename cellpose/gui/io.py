@@ -244,7 +244,7 @@ def _load_image_series(parent):
 
 def _load_series_item(parent, dataset, item_index, load_seg=True, load_3D=False):
     output_filename = series.get_output_filename(dataset, item_index)
-    seg_filename = os.path.splitext(output_filename)[0] + "_seg.npy"
+    seg_filename = os.path.splitext(output_filename)[0] + "_seg.cellpose"
     if load_seg and os.path.isfile(seg_filename):
         _load_seg(parent, filename=seg_filename, load_3D=load_3D)
         if getattr(parent, "series_dataset", None) is None:
@@ -271,7 +271,7 @@ def _load_image(parent, filename=None, load_seg=True, load_3D=False):
         if filename == "":
             return
     _clear_series_state(parent)
-    manual_file = os.path.splitext(filename)[0] + "_seg.npy"
+    manual_file = os.path.splitext(filename)[0] + "_seg.cellpose"
     load_mask = False
     if load_seg:
         if os.path.isfile(manual_file) and not parent.autoloadMasks.isChecked():
@@ -392,157 +392,107 @@ def _initialize_images(parent, image, load_3D=False):
         parent.currentZ = 0
 
 
-def _load_seg(parent, filename=None, image=None, image_file=None, load_3D=False):
-    """ load *_seg.npy with filename; if None, open QFileDialog """
-    if filename is None:
-        name = QFileDialog.getOpenFileName(parent, "Load labelled data", filter="*.npy")
-        filename = name[0]
-    try:
-        dat = np.load(filename, allow_pickle=True).item()
-        # check if there are keys in filename
-        dat["outlines"]
-        parent.loaded = True
-    except:
-        parent.loaded = False
-        print("ERROR: not NPY")
+def _apply_cellpose_segmentation_widgets(parent, segmentation) -> None:
+    if not hasattr(parent, "seg_param_root"):
         return
 
-    dataset = None
-    dataset_index = None
-    if image is None and "image_series" in dat:
+    parent.seg_param_root.param("flow_threshold").setValue(
+        float(segmentation.flow_threshold)
+    )
+    parent.seg_param_root.param("cellprob_threshold").setValue(
+        float(segmentation.cellprob_threshold)
+    )
+    parent.seg_param_root.param("niter").setValue(int(segmentation.niter))
+    if segmentation.diameter is not None:
+        parent.seg_param_root.param("diameter").setValue(float(segmentation.diameter))
+
+
+def _load_seg(parent, filename=None, image=None, image_file=None, load_3D=False):
+    """Load a *_seg.cellpose session archive."""
+    from cellpose.gui.session_format import read_session
+
+    if filename is None:
+        name = QFileDialog.getOpenFileName(
+            parent, "Load labelled data", filter="*.cellpose"
+        )
+        filename = name[0]
+        if filename == "":
+            return
+
+    try:
+        session_data = read_session(filename)
+    except Exception as exc:
+        parent.loaded = False
+        print(f"ERROR: not a valid .cellpose session: {exc}")
+        return
+
+    if image is None:
+        image_path = session_data.source_image
+        if not os.path.isfile(image_path):
+            parent.loaded = False
+            print(f"ERROR: cannot find image file: {image_path}")
+            return
         try:
-            dataset, dataset_index = series.resolve_series_metadata(dat["image_series"])
-            image_file = dataset["records"][dataset_index]["path"]
-        except Exception as e:
-            print(f"ERROR: cannot reconstruct image series state, {e}")
-            dataset = None
-            dataset_index = None
+            print(f"GUI_INFO: loading image: {image_path}")
+            image = imread_2D(image_path) if not load_3D else imread_3D(image_path)
+        except Exception as exc:
+            parent.loaded = False
+            print(f"ERROR: cannot load image: {exc}")
+            return
+        parent.filename = image_path
+    else:
+        parent.filename = image_file or session_data.source_image
 
     parent.reset()
-    if image is None:
-        found_image = False
-        if "filename" in dat:
-            parent.filename = dat["filename"]
-            if os.path.isfile(parent.filename):
-                parent.filename = dat["filename"]
-                found_image = True
-            else:
-                imgname = os.path.split(parent.filename)[1]
-                root = os.path.split(filename)[0]
-                parent.filename = root + "/" + imgname
-                if os.path.isfile(parent.filename):
-                    found_image = True
-        if found_image:
-            try:
-                print(parent.filename)
-                image = (imread_2D(parent.filename) if not load_3D else 
-                         imread_3D(parent.filename))
-            except:
-                parent.loaded = False
-                found_image = False
-                print("ERROR: cannot find image file, loading from npy")
-        if not found_image:
-            parent.filename = filename[:-8]
-            print(parent.filename)
-            if "img" in dat:
-                image = dat["img"]
-            else:
-                print("ERROR: no image file found and no image in npy")
-                return
-    else:
-        parent.filename = image_file
-
-    if dataset is not None:
-        _set_series_state(parent, dataset=dataset, item_index=dataset_index)
-    else:
-        _clear_series_state(parent)
-        parent.output_filename = None
-        parent.display_filename = parent.filename
-
+    _clear_series_state(parent)
+    parent.output_filename = None
+    parent.display_filename = parent.filename
     parent.restore = None
-    parent.ratio = 1.
-
-    if "normalize_params" in dat:
-        parent.set_normalize_params(dat["normalize_params"])
+    parent.ratio = 1.0
 
     _initialize_images(parent, image, load_3D=load_3D)
-    print(parent.stack.shape)
 
-    if "outlines" in dat:
-        if isinstance(dat["outlines"], list):
-            # old way of saving files
-            dat["outlines"] = dat["outlines"][::-1]
-            for k, outline in enumerate(dat["outlines"]):
-                if "colors" in dat:
-                    color = dat["colors"][k]
-                else:
-                    col_rand = np.random.randint(1000)
-                    color = parent.colormap[col_rand, :3]
-                median = parent.add_mask(points=outline, color=color)
-                if median is not None:
-                    parent.cellcolors = np.append(parent.cellcolors,
-                                                  color[np.newaxis, :], axis=0)
-                    parent.ncells_counter += 1
-        else:
-            if dat["masks"].min() == -1:
-                dat["masks"] += 1
-                dat["outlines"] += 1
-            ncells = int(dat["masks"].max())
-            if "colors" in dat and len(dat["colors"]) == ncells:
-                colors = dat["colors"]
-            else:
-                colors = parent.colormap[:ncells, :3]
+    masks = np.asarray(session_data.masks)
+    if masks.min() == -1:
+        masks = masks + 1
+    ncells = int(masks.max())
+    colors = session_data.colors
+    if colors is None and ncells > 0:
+        colors = parent.colormap[:ncells, :3]
 
-            _masks_to_gui(parent, dat["masks"], outlines=dat["outlines"], colors=colors)
-
-            parent.draw_layer()
-
-        if "manual_changes" in dat:
-            parent.track_changes = dat["manual_changes"]
-            print("GUI_INFO: loaded in previous changes")
-        if "zdraw" in dat:
-            parent.zdraw = dat["zdraw"]
-        else:
-            parent.zdraw = [None for n in range(parent.ncells())]
-        parent.loaded = True
-    else:
-        parent.clear_all()
+    _masks_to_gui(parent, masks, colors=colors)
+    _apply_cellpose_segmentation_widgets(parent, session_data.segmentation)
 
     parent.ismanual = np.zeros(parent.ncells(), bool)
-    if "ismanual" in dat:
-        if len(dat["ismanual"]) == parent.ncells():
-            parent.ismanual = dat["ismanual"]
+    if (
+        session_data.ismanual is not None
+        and len(session_data.ismanual) == parent.ncells()
+    ):
+        parent.ismanual = session_data.ismanual
 
     if hasattr(parent, "set_instance_classes"):
-        parent.set_instance_classes(dat.get("instance_classes"))
-    if hasattr(parent, "set_instance_visible"):
-        parent.set_instance_visible()
+        parent.set_instance_classes(session_data.instance_classes)
 
-    if "flows" in dat:
-        parent.flows = dat["flows"]
+    if session_data.flows:
+        parent.flows = session_data.flows
         try:
-            if parent.flows[0].shape[-3] != dat["masks"].shape[-2]:
-                Ly, Lx = dat["masks"].shape[-2:]
+            if parent.flows[0].shape[-3] != masks.shape[-2]:
+                Ly, Lx = masks.shape[-2:]
                 for i in range(len(parent.flows)):
                     parent.flows[i] = cv2.resize(
-                        parent.flows[i].squeeze(), (Lx, Ly),
-                        interpolation=cv2.INTER_NEAREST)[np.newaxis, ...]
-            if parent.NZ == 1:
-                parent.recompute_masks = True
-            else:
-                parent.recompute_masks = False
+                        parent.flows[i].squeeze(),
+                        (Lx, Ly),
+                        interpolation=cv2.INTER_NEAREST,
+                    )[np.newaxis, ...]
+        except Exception:
+            pass
+        parent.recompute_masks = session_data.recompute_masks
+    else:
+        parent.recompute_masks = False
 
-        except:
-            try:
-                if len(parent.flows[0]) > 0:
-                    parent.flows = parent.flows[0]
-            except:
-                parent.flows = [[], [], [], [], [[]]]
-            parent.recompute_masks = False
-
+    parent.loaded = True
     parent.enable_buttons()
     parent.update_layer()
-    del dat
     gc.collect()
 
 
@@ -734,104 +684,40 @@ def _save_outlines(parent):
 
 
 def _save_sets_with_check(parent):
-    """ Save masks and update *_seg.npy file. Use this function when saving should be optional
-     based on the disableAutosave checkbox. Otherwise, use _save_sets """
+    """Save masks to *_seg.cellpose when autosave is enabled."""
     if not parent.disableAutosave.isChecked():
         _save_sets(parent)
 
 
 def _save_sets(parent):
-    """ save masks to *_seg.npy. This function should be used when saving
-    is forced, e.g. when clicking the save button. Otherwise, use _save_sets_with_check
-    """
+    """Save masks to *_seg.cellpose."""
     if hasattr(parent, "presenter"):
         parent.presenter.save_sets()
         return
+
+    from cellpose.gui.session_format import write_session
+
     filename = _get_output_filename(parent)
     base = os.path.splitext(filename)[0]
+    path = base + "_seg.cellpose"
     segmentation_params = parent.get_segmentation_parameters()
 
-    if parent.NZ > 1:
-        dat = {
-            "outlines":
-                parent.outpix,
-            "colors":
-                parent.cellcolors[1:],
-            "masks":
-                parent.cellpix,
-            "filename":
-                parent.filename,
-            "flows":
-                parent.flows,
-            "zdraw":
-                parent.zdraw,
-            "model_path":
-                parent.current_model_path
-                if hasattr(parent, "current_model_path") else 0,
-            "flow_threshold":
-                segmentation_params["flow_threshold"],
-            "cellprob_threshold":
-                segmentation_params["cellprob_threshold"],
-            "normalize_params":
-                parent.get_normalize_params(),
-            "restore":
-                parent.restore,
-            "ratio":
-                parent.ratio,
-            "diameter":
-                segmentation_params["diameter"]
-        }
-        if parent.restore is not None:
-            dat["img_restore"] = parent.stack_filtered
-    else:
-        dat = {
-            "outlines":
-                parent.outpix.squeeze() if parent.restore is None or
-                "upsample" not in parent.restore else parent.outpix_resize.squeeze(),
-            "colors":
-                parent.cellcolors[1:],
-            "masks":
-                parent.cellpix.squeeze() if parent.restore is None or
-                "upsample" not in parent.restore else parent.cellpix_resize.squeeze(),
-            "filename":
-                parent.filename,
-            "flows":
-                parent.flows,
-            "ismanual":
-                parent.ismanual,
-            "manual_changes":
-                parent.track_changes,
-            "model_path":
-                parent.current_model_path
-                if hasattr(parent, "current_model_path") else 0,
-            "flow_threshold":
-                segmentation_params["flow_threshold"],
-            "cellprob_threshold":
-                segmentation_params["cellprob_threshold"],
-            "normalize_params":
-                parent.get_normalize_params(),
-            "restore":
-                parent.restore,
-            "ratio":
-                parent.ratio,
-            "diameter":
-                segmentation_params["diameter"]
-        }
-        if parent.restore is not None:
-            dat["img_restore"] = parent.stack_filtered
-    if hasattr(parent, "_ensure_instance_classes"):
-        parent._ensure_instance_classes()
-        dat["instance_classes"] = parent.instance_classes
-    if (
-        getattr(parent, "series_dataset", None) is not None
-        and parent.series_index is not None
-    ):
-        dat["image_series"] = series.build_series_metadata(
-            parent.series_dataset, parent.series_index
+    if hasattr(parent, "model"):
+        model_name = "cpsam"
+        if hasattr(parent, "ModelChooseC"):
+            model_name = parent.ModelChooseC.currentText().lower()
+        session_data = parent.model.to_session_data(
+            source_image=str(parent.filename),
+            model=model_name,
+            segmentation_params=segmentation_params,
+            recompute_masks=bool(getattr(parent, "recompute_masks", False)),
         )
+    else:
+        print("ERROR: cannot save session without model state")
+        return
+
     try:
-        np.save(base + "_seg.npy", dat)
-        print("GUI_INFO: %d ROIs saved to %s" % (parent.ncells(), base + "_seg.npy"))
+        written = write_session(path, session_data)
+        print("GUI_INFO: %d ROIs saved to %s" % (parent.ncells(), written))
     except Exception as e:
         print(f"ERROR: {e}")
-    del dat

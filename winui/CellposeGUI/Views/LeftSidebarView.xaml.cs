@@ -55,30 +55,44 @@ public sealed partial class LeftSidebarView : UserControl
                 await _viewModel.ComputeSaturationAsync();
         };
 
-        GrayLowSlider.ValueChanged += (_, e) =>
+        GrayLowSlider.ValueChanged += (_, _) =>
         {
-            if (_suppressGraySliderEvents || _viewModel == null)
+            if (_suppressGraySliderEvents)
                 return;
 
-            var low = Math.Min(e.NewValue, _viewModel.DisplayParams.GrayHigh - 1);
-            _viewModel.DisplayParams.GrayLow = Math.Max(0, low);
             UpdateGraySliderLabels();
         };
 
-        GrayHighSlider.ValueChanged += (_, e) =>
+        GrayLowSlider.PointerReleased += (_, _) => CommitGrayLow();
+        GrayLowSlider.PointerCaptureLost += (_, _) => CommitGrayLow();
+
+        GrayHighSlider.ValueChanged += (_, _) =>
         {
-            if (_suppressGraySliderEvents || _viewModel == null)
+            if (_suppressGraySliderEvents)
                 return;
 
-            var high = Math.Max(e.NewValue, _viewModel.DisplayParams.GrayLow + 1);
-            _viewModel.DisplayParams.GrayHigh = Math.Min(255, high);
             UpdateGraySliderLabels();
         };
+
+        GrayHighSlider.PointerReleased += (_, _) => CommitGrayHigh();
+        GrayHighSlider.PointerCaptureLost += (_, _) => CommitGrayHigh();
 
         DefaultClassBox.ValueChanged += (_, e) =>
         {
             if (_viewModel != null)
                 _viewModel.DefaultClassId = (int)e.NewValue;
+        };
+
+        BrushButton.Checked += (_, _) =>
+        {
+            if (_viewModel != null)
+                _viewModel.BrushMode = true;
+        };
+
+        BrushButton.Unchecked += (_, _) =>
+        {
+            if (_viewModel != null)
+                _viewModel.BrushMode = false;
         };
     }
 
@@ -205,6 +219,7 @@ public sealed partial class LeftSidebarView : UserControl
         RefreshAxisRows();
 
         DefaultClassBox.Value = _viewModel.DefaultClassId;
+        BrushButton.IsChecked = _viewModel.BrushMode;
     }
 
     private void SyncGraySliders()
@@ -231,12 +246,33 @@ public sealed partial class LeftSidebarView : UserControl
         GrayHighValueText.Text = $"{GrayHighSlider.Value:0}";
     }
 
+    private void CommitGrayLow()
+    {
+        if (_suppressGraySliderEvents || _viewModel == null)
+            return;
+
+        var low = Math.Min(GrayLowSlider.Value, _viewModel.DisplayParams.GrayHigh - 1);
+        _viewModel.DisplayParams.GrayLow = Math.Max(0, low);
+        UpdateGraySliderLabels();
+    }
+
+    private void CommitGrayHigh()
+    {
+        if (_suppressGraySliderEvents || _viewModel == null)
+            return;
+
+        var high = Math.Max(GrayHighSlider.Value, _viewModel.DisplayParams.GrayLow + 1);
+        _viewModel.DisplayParams.GrayHigh = Math.Min(255, high);
+        UpdateGraySliderLabels();
+    }
+
     private void UpdateControlStates()
     {
         if (_viewModel == null)
             return;
 
         AutoSaturationButton.IsEnabled = _viewModel.ImageLoaded && !_viewModel.IsBusy;
+        BrushButton.IsEnabled = _viewModel.ImageLoaded;
         GrayLowSlider.IsEnabled = _viewModel.ImageLoaded;
         GrayHighSlider.IsEnabled = _viewModel.ImageLoaded;
     }
@@ -275,6 +311,9 @@ public sealed partial class LeftSidebarView : UserControl
                 break;
             case nameof(MainViewModel.ViewMode):
                 RefreshViewModeCombo();
+                break;
+            case nameof(MainViewModel.BrushMode):
+                BrushButton.IsChecked = _viewModel?.BrushMode ?? false;
                 break;
         }
     }

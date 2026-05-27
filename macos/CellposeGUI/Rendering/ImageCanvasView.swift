@@ -7,15 +7,19 @@ struct ImageCanvasView: NSViewRepresentable {
 
     func makeNSView(context: Context) -> ImageCanvasNSView {
         let view = ImageCanvasNSView()
-        view.onClick = { point, flags in
-            if flags.contains(.shift) {
-                viewModel.beginStroke(at: Int(point.x), y: Int(point.y))
+        view.onClick = { point in
+            if viewModel.brushMode {
+                if viewModel.inStroke {
+                    Task { await viewModel.completeStroke(at: Int(point.x), y: Int(point.y)) }
+                } else {
+                    viewModel.beginStroke(at: Int(point.x), y: Int(point.y))
+                }
             } else {
-                viewModel.removeCell(at: Int(point.x), y: Int(point.y), modifierFlags: flags)
+                viewModel.removeCell(at: Int(point.x), y: Int(point.y), modifierFlags: view.lastModifierFlags)
             }
         }
-        view.onDrag = { point, flags in
-            if flags.contains(.shift) {
+        view.onHover = { point in
+            if viewModel.brushMode, viewModel.inStroke {
                 viewModel.continueStroke(at: Int(point.x), y: Int(point.y))
             }
         }
@@ -57,16 +61,29 @@ final class ImageCanvasNSView: NSView {
     var showOutlines = false
     var selectedCell: Int32 = 0
     var zoom: CGFloat = 1
-    var onClick: ((NSPoint, NSEvent.ModifierFlags) -> Void)?
-    var onDrag: ((NSPoint, NSEvent.ModifierFlags) -> Void)?
+    var onClick: ((NSPoint) -> Void)?
+    var onHover: ((NSPoint) -> Void)?
     var onScroll: ((CGFloat) -> Void)?
 
     private var panOffset = NSPoint.zero
-    private var isDragging = false
+    private var trackingArea: NSTrackingArea?
+    var lastModifierFlags: NSEvent.ModifierFlags = []
 
     var onKeyPress: ((NSEvent) -> Void)?
 
     override var acceptsFirstResponder: Bool { true }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let trackingArea {
+            removeTrackingArea(trackingArea)
+        }
+        let options: NSTrackingArea.Options = [.mouseMoved, .activeInKeyWindow, .inVisibleRect]
+        trackingArea = NSTrackingArea(rect: bounds, options: options, owner: self, userInfo: nil)
+        if let trackingArea {
+            addTrackingArea(trackingArea)
+        }
+    }
 
     override func draw(_ dirtyRect: NSRect) {
         guard let context = NSGraphicsContext.current?.cgContext else { return }
@@ -151,20 +168,14 @@ final class ImageCanvasNSView: NSView {
     }
 
     override func mouseDown(with event: NSEvent) {
+        lastModifierFlags = event.modifierFlags
         guard let point = imagePoint(from: convert(event.locationInWindow, from: nil)) else { return }
-        if event.modifierFlags.contains(.shift) {
-            isDragging = true
-        }
-        onClick?(point, event.modifierFlags)
+        onClick?(point)
     }
 
-    override func mouseDragged(with event: NSEvent) {
-        guard isDragging, let point = imagePoint(from: convert(event.locationInWindow, from: nil)) else { return }
-        onDrag?(point, event.modifierFlags)
-    }
-
-    override func mouseUp(with event: NSEvent) {
-        isDragging = false
+    override func mouseMoved(with event: NSEvent) {
+        guard let point = imagePoint(from: convert(event.locationInWindow, from: nil)) else { return }
+        onHover?(point)
     }
 
     override func scrollWheel(with event: NSEvent) {

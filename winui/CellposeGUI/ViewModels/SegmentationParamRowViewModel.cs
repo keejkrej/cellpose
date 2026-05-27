@@ -11,7 +11,6 @@ public enum SegmentationParamId
     PercentileLow,
     PercentileHigh,
     Niter,
-    Run,
 }
 
 public sealed class SegmentationParamRowViewModel
@@ -35,7 +34,6 @@ public sealed class SegmentationParamRowViewModel
         new(viewModel, SegmentationParamId.PercentileLow, "norm percentile lower"),
         new(viewModel, SegmentationParamId.PercentileHigh, "norm percentile upper"),
         new(viewModel, SegmentationParamId.Niter, "niter dynamics"),
-        new(viewModel, SegmentationParamId.Run, "run"),
     ];
 
     public string Label { get; }
@@ -53,9 +51,6 @@ public sealed class SegmentationParamRowViewModel
             && _paramId is not (SegmentationParamId.PercentileLow or SegmentationParamId.PercentileHigh)
             ? Visibility.Visible
             : Visibility.Collapsed;
-
-    public Visibility RunEditorVisibility =>
-        _paramId == SegmentationParamId.Run ? Visibility.Visible : Visibility.Collapsed;
 
     public IList<string> Models => _viewModel.Models;
 
@@ -110,13 +105,4 @@ public sealed class SegmentationParamRowViewModel
         SegmentationParamId.Niter => 1,
         _ => 1,
     };
-
-    public bool CanRunSegmentation => _viewModel.CanRunSegmentation;
-
-    public double Progress => _viewModel.Progress;
-
-    public double RunProgressOpacity => _viewModel.RunProgressOpacity;
-
-    public void RunSegmentationInvoked(object sender, RoutedEventArgs e) =>
-        _viewModel.RunSegmentationInvoked(sender, e);
 }

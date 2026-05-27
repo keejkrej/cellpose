@@ -1,15 +1,16 @@
-"""I/O routes for images and _seg.npy files."""
+"""I/O routes for images and `.cellpose` session files."""
 
 from __future__ import annotations
 
 import os
-from pathlib import Path
 
 import numpy as np
 
 from fastapi import APIRouter, HTTPException
 
-from cellpose.io import imread, imread_2D, imread_3D
+from cellpose.gui.session_format import default_session_path, read_session, write_session
+from cellpose.gui.session_format.models import SegmentationMetadata, SessionData
+from cellpose.io import imread_2D, imread_3D
 
 from ..arrays import decode_array, encode_array
 from ..mask_ops import apply_masks
@@ -21,41 +22,60 @@ from ..session import SESSIONS, SidecarSession
 router = APIRouter(tags=["io"])
 
 
-def _load_seg_data(path: str, load_3D: bool) -> SidecarSession:
-    dat = np.load(path, allow_pickle=True).item()
-    filename = dat.get("filename")
-    image = None
-    if filename and os.path.isfile(filename):
-        image = imread_2D(filename) if not load_3D else imread_3D(filename)
-    elif "img" in dat:
-        image = dat["img"]
-    else:
-        raise ValueError("No image found in seg file or at filename path")
+def _segmentation_metadata(params: dict) -> SegmentationMetadata:
+    return SegmentationMetadata(
+        flow_threshold=float(params.get("flow_threshold", 0.4)),
+        cellprob_threshold=float(params.get("cellprob_threshold", 0.0)),
+        diameter=params.get("diameter"),
+        niter=int(params.get("niter", 200)),
+        min_size=int(params.get("min_size", 15)),
+    )
 
-    session = SESSIONS.create(image=np.asarray(image), filename=filename or path)
-    masks = dat.get("masks")
-    if masks is not None:
-        apply_masks(session, np.asarray(masks))
-        session.outlines = dat.get("outlines")
-        session.colors = dat.get("colors")
-        session.instance_classes = dat.get("instance_classes")
-        session.ismanual = dat.get("ismanual")
-        session.flows = dat.get("flows")
-        session.normalize_params = dat.get("normalize_params", {})
-        session.restore = dat.get("restore")
-        session.ratio = float(dat.get("ratio", 1.0))
-        session.manual_changes = dat.get("manual_changes", [])
-        session.zdraw = dat.get("zdraw", [])
-        session.model_path = dat.get("model_path", 0)
-        session.segmentation_params = {
-            "flow_threshold": dat.get("flow_threshold", 0.4),
-            "cellprob_threshold": dat.get("cellprob_threshold", 0.0),
-            "diameter": dat.get("diameter"),
-        }
-        if session.flows and session.masks is not None and session.masks.ndim >= 2:
-            session.recompute_masks = session.masks.shape[0] == 1
-        if dat.get("img_restore") is not None:
-            session.stack_filtered = dat["img_restore"]
+
+def _sidecar_to_session_data(session: SidecarSession) -> SessionData:
+    if session.masks is None or not session.filename:
+        raise ValueError("Nothing to save")
+
+    model = str(session.model_path) if session.model_path else "cpsam"
+    if model == "0":
+        model = "cpsam"
+
+    return SessionData(
+        source_image=session.filename,
+        masks=np.asarray(session.masks).squeeze(),
+        flows=session.flows,
+        colors=session.colors,
+        instance_classes=session.instance_classes,
+        ismanual=session.ismanual,
+        model=model,
+        recompute_masks=session.recompute_masks,
+        segmentation=_segmentation_metadata(session.segmentation_params),
+    )
+
+
+def _load_cellpose_session(path: str, load_3D: bool) -> SidecarSession:
+    session_data = read_session(path)
+    image_path = session_data.source_image
+    if not os.path.isfile(image_path):
+        raise ValueError(f"Source image not found: {image_path}")
+
+    image = imread_2D(image_path) if not load_3D else imread_3D(image_path)
+    session = SESSIONS.create(image=np.asarray(image), filename=image_path)
+    masks = np.asarray(session_data.masks)
+    apply_masks(session, masks)
+    session.colors = session_data.colors
+    session.instance_classes = session_data.instance_classes
+    session.ismanual = session_data.ismanual
+    session.flows = session_data.flows
+    session.recompute_masks = session_data.recompute_masks
+    session.model_path = session_data.model
+    session.segmentation_params = {
+        "flow_threshold": session_data.segmentation.flow_threshold,
+        "cellprob_threshold": session_data.segmentation.cellprob_threshold,
+        "diameter": session_data.segmentation.diameter,
+        "niter": session_data.segmentation.niter,
+        "min_size": session_data.segmentation.min_size,
+    }
     return session
 
 
@@ -78,7 +98,7 @@ def load_seg(request: LoadSegRequest) -> SessionResponse:
     if not os.path.isfile(path):
         raise HTTPException(status_code=404, detail=f"File not found: {path}")
     try:
-        session = _load_seg_data(path, request.load_3D)
+        session = _load_cellpose_session(path, request.load_3D)
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return _session_response(session)
@@ -97,35 +117,17 @@ def save_seg(request: SaveSegRequest) -> dict:
     if filename is None:
         if not session.filename:
             raise HTTPException(status_code=400, detail="path required")
-        filename = os.path.splitext(session.filename)[0] + "_seg.npy"
+        filename = default_session_path(session.filename)
     else:
         filename = os.path.expanduser(filename)
-        if not filename.endswith("_seg.npy"):
-            filename = os.path.splitext(filename)[0] + "_seg.npy"
+        if not filename.endswith(".cellpose"):
+            filename = default_session_path(filename)
 
-    params = session.segmentation_params
-    dat = {
-        "outlines": session.outlines.squeeze() if session.outlines is not None else None,
-        "colors": session.colors,
-        "masks": session.masks.squeeze(),
-        "filename": session.filename,
-        "flows": session.flows,
-        "ismanual": session.ismanual,
-        "manual_changes": session.manual_changes,
-        "model_path": session.model_path,
-        "flow_threshold": params.get("flow_threshold", 0.4),
-        "cellprob_threshold": params.get("cellprob_threshold", 0.0),
-        "normalize_params": session.normalize_params,
-        "restore": session.restore,
-        "ratio": session.ratio,
-        "diameter": params.get("diameter"),
-        "instance_classes": session.instance_classes,
-    }
-    if session.stack_filtered is not None:
-        dat["img_restore"] = session.stack_filtered
-    if session.series_metadata is not None:
-        dat["image_series"] = session.series_metadata
+    try:
+        session_data = _sidecar_to_session_data(session)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    Path(filename).parent.mkdir(parents=True, exist_ok=True)
-    np.save(filename, dat)
-    return {"path": filename, "ncells": session.ncells}
+    os.makedirs(os.path.dirname(filename) or ".", exist_ok=True)
+    written = write_session(filename, session_data)
+    return {"path": written, "ncells": session.ncells}

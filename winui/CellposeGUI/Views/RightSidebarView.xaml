@@ -24,67 +24,68 @@
                 IsExpanded="True"
                 HorizontalAlignment="Stretch"
                 HorizontalContentAlignment="Stretch">
-                <controls:DataGrid
-                    x:Name="SegmentationGrid"
-                    HorizontalAlignment="Stretch"
-                    AutoGenerateColumns="False"
-                    CanUserReorderColumns="False"
-                    CanUserResizeColumns="True"
-                    CanUserSortColumns="False"
-                    GridLinesVisibility="Horizontal"
-                    HeadersVisibility="Column"
-                    IsReadOnly="True"
-                    SelectionMode="Single">
-                    <controls:DataGrid.Columns>
-                        <controls:DataGridTextColumn
-                            Header="parameter"
-                            Width="160"
-                            Binding="{Binding Label}"
-                            IsReadOnly="True" />
-                        <controls:DataGridTemplateColumn Header="value" Width="*">
-                            <controls:DataGridTemplateColumn.CellTemplate>
-                                <DataTemplate x:DataType="vm:SegmentationParamRowViewModel">
-                                    <Grid Margin="0,2">
-                                        <ComboBox
-                                            HorizontalAlignment="Stretch"
-                                            ItemsSource="{x:Bind Models, Mode=OneWay}"
-                                            SelectedIndex="{x:Bind SelectedModelIndex, Mode=TwoWay}"
-                                            Visibility="{x:Bind ModelEditorVisibility, Mode=OneWay}" />
-                                        <NumberBox
-                                            HorizontalAlignment="Stretch"
-                                            SmallChange="{x:Bind SmallChange, Mode=OneWay}"
-                                            SpinButtonPlacementMode="Inline"
-                                            Value="{x:Bind NumberValue, Mode=TwoWay}"
-                                            Visibility="{x:Bind GeneralNumberEditorVisibility, Mode=OneWay}" />
-                                        <NumberBox
-                                            HorizontalAlignment="Stretch"
-                                            Maximum="100"
-                                            Minimum="0"
-                                            SmallChange="{x:Bind SmallChange, Mode=OneWay}"
-                                            SpinButtonPlacementMode="Inline"
-                                            Value="{x:Bind NumberValue, Mode=TwoWay}"
-                                            Visibility="{x:Bind PercentileNumberEditorVisibility, Mode=OneWay}" />
-                                        <Grid
-                                            ColumnDefinitions="Auto,*"
-                                            Visibility="{x:Bind RunEditorVisibility, Mode=OneWay}">
-                                            <Button
-                                                Content="run"
-                                                Click="{x:Bind RunSegmentationInvoked}"
-                                                IsEnabled="{x:Bind CanRunSegmentation, Mode=OneWay}" />
-                                            <ProgressBar
-                                                Grid.Column="1"
-                                                Margin="8,0,0,0"
-                                                Maximum="1"
+                <StackPanel Spacing="8" HorizontalAlignment="Stretch">
+                    <controls:DataGrid
+                        x:Name="SegmentationGrid"
+                        HorizontalAlignment="Stretch"
+                        AutoGenerateColumns="False"
+                        CanUserReorderColumns="False"
+                        CanUserResizeColumns="True"
+                        CanUserSortColumns="False"
+                        GridLinesVisibility="Horizontal"
+                        HeadersVisibility="Column"
+                        IsReadOnly="True"
+                        SelectionMode="Single">
+                        <controls:DataGrid.Columns>
+                            <controls:DataGridTextColumn
+                                Header="parameter"
+                                Width="160"
+                                Binding="{Binding Label}"
+                                IsReadOnly="True" />
+                            <controls:DataGridTemplateColumn Header="value" Width="*">
+                                <controls:DataGridTemplateColumn.CellTemplate>
+                                    <DataTemplate x:DataType="vm:SegmentationParamRowViewModel">
+                                        <Grid Margin="0,2">
+                                            <ComboBox
                                                 HorizontalAlignment="Stretch"
-                                                Opacity="{x:Bind RunProgressOpacity, Mode=OneWay}"
-                                                Value="{x:Bind Progress, Mode=OneWay}" />
+                                                ItemsSource="{x:Bind Models, Mode=OneWay}"
+                                                SelectedIndex="{x:Bind SelectedModelIndex, Mode=TwoWay}"
+                                                Visibility="{x:Bind ModelEditorVisibility, Mode=OneWay}" />
+                                            <NumberBox
+                                                HorizontalAlignment="Stretch"
+                                                SmallChange="{x:Bind SmallChange, Mode=OneWay}"
+                                                SpinButtonPlacementMode="Inline"
+                                                Value="{x:Bind NumberValue, Mode=TwoWay}"
+                                                Visibility="{x:Bind GeneralNumberEditorVisibility, Mode=OneWay}" />
+                                            <NumberBox
+                                                HorizontalAlignment="Stretch"
+                                                Maximum="100"
+                                                Minimum="0"
+                                                SmallChange="{x:Bind SmallChange, Mode=OneWay}"
+                                                SpinButtonPlacementMode="Inline"
+                                                Value="{x:Bind NumberValue, Mode=TwoWay}"
+                                                Visibility="{x:Bind PercentileNumberEditorVisibility, Mode=OneWay}" />
                                         </Grid>
-                                    </Grid>
-                                </DataTemplate>
-                            </controls:DataGridTemplateColumn.CellTemplate>
-                        </controls:DataGridTemplateColumn>
-                    </controls:DataGrid.Columns>
-                </controls:DataGrid>
+                                    </DataTemplate>
+                                </controls:DataGridTemplateColumn.CellTemplate>
+                            </controls:DataGridTemplateColumn>
+                        </controls:DataGrid.Columns>
+                    </controls:DataGrid>
+                    <Grid ColumnDefinitions="Auto,*">
+                        <Button
+                            Content="run"
+                            Click="{x:Bind ViewModel.RunSegmentationInvoked, Mode=OneWay}"
+                            IsEnabled="{x:Bind ViewModel.CanRunSegmentation, Mode=OneWay}" />
+                        <ProgressBar
+                            Grid.Column="1"
+                            Margin="8,0,0,0"
+                            Maximum="1"
+                            HorizontalAlignment="Stretch"
+                            IsIndeterminate="False"
+                            Opacity="{x:Bind ViewModel.SegmentationProgressOpacity, Mode=OneWay}"
+                            Value="{x:Bind ViewModel.SegmentationProgress, Mode=OneWay}" />
+                    </Grid>
+                </StackPanel>
             </Expander>
 
             <Expander
