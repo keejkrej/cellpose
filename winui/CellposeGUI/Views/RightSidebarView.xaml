@@ -14,20 +14,16 @@
     VerticalAlignment="Stretch"
     VerticalContentAlignment="Stretch"
     mc:Ignorable="d">
-    <Grid MinHeight="0" Padding="8" RowDefinitions="*,*" RowSpacing="8">
-        <Expander
-            Grid.Row="0"
-            MinHeight="0"
-            Header="Segmentation"
-            IsExpanded="True"
-            HorizontalAlignment="Stretch"
-            HorizontalContentAlignment="Stretch"
-            VerticalAlignment="Stretch"
-            VerticalContentAlignment="Stretch">
-            <ScrollViewer
+    <ScrollViewer
+        HorizontalAlignment="Stretch"
+        HorizontalScrollBarVisibility="Disabled"
+        VerticalScrollBarVisibility="Auto">
+        <StackPanel Padding="8" Spacing="8" HorizontalAlignment="Stretch">
+            <Expander
+                Header="Segmentation"
+                IsExpanded="True"
                 HorizontalAlignment="Stretch"
-                HorizontalScrollBarVisibility="Disabled"
-                VerticalScrollBarVisibility="Auto">
+                HorizontalContentAlignment="Stretch">
                 <controls:DataGrid
                     x:Name="SegmentationGrid"
                     HorizontalAlignment="Stretch"
@@ -89,83 +85,75 @@
                         </controls:DataGridTemplateColumn>
                     </controls:DataGrid.Columns>
                 </controls:DataGrid>
-            </ScrollViewer>
-        </Expander>
+            </Expander>
 
-        <Expander
-            Grid.Row="1"
-            MinHeight="0"
-            Header="Instances"
-            IsExpanded="True"
-            HorizontalAlignment="Stretch"
-            HorizontalContentAlignment="Stretch"
-            VerticalAlignment="Stretch"
-            VerticalContentAlignment="Stretch">
-            <Grid MinHeight="0" RowDefinitions="Auto,Auto,*" RowSpacing="6">
-                <TextBox
-                    Grid.Row="0"
-                    Header="class filter"
-                    PlaceholderText="all"
-                    HorizontalAlignment="Stretch"
-                    Text="{x:Bind ViewModel.ClassFilterText, Mode=TwoWay}" />
-                <Grid Grid.Row="1" Padding="12,0,8,0" ColumnDefinitions="40,60,*">
-                    <CheckBox
-                        Grid.Column="0"
-                        HorizontalAlignment="Center"
-                        IsThreeState="True"
-                        IsChecked="{x:Bind ViewModel.AllInstancesVisible, Mode=TwoWay}" />
-                    <TextBlock
-                        Grid.Column="1"
-                        VerticalAlignment="Center"
-                        FontWeight="SemiBold"
-                        Text="ROI" />
-                    <TextBlock
-                        Grid.Column="2"
-                        VerticalAlignment="Center"
-                        FontWeight="SemiBold"
-                        Text="Class ID" />
-                </Grid>
-                <controls:DataGrid
-                    x:Name="InstanceGrid"
-                    Grid.Row="2"
-                    MinHeight="0"
-                    HorizontalAlignment="Stretch"
-                    VerticalAlignment="Stretch"
-                    AutoGenerateColumns="False"
-                    CanUserReorderColumns="False"
-                    CanUserSortColumns="False"
-                    GridLinesVisibility="Horizontal"
-                    HeadersVisibility="None"
-                    SelectionMode="Extended"
-                    LoadingRow="InstanceGrid_LoadingRow">
-                    <controls:DataGrid.Columns>
-                        <controls:DataGridTemplateColumn Width="40">
-                            <controls:DataGridTemplateColumn.CellTemplate>
-                                <DataTemplate x:DataType="vm:InstanceRowViewModel">
-                                    <CheckBox
-                                        HorizontalAlignment="Center"
-                                        IsChecked="{x:Bind Visible, Mode=TwoWay}" />
-                                </DataTemplate>
-                            </controls:DataGridTemplateColumn.CellTemplate>
-                        </controls:DataGridTemplateColumn>
-                        <controls:DataGridTextColumn
-                            Width="60"
-                            Binding="{Binding RoiLabel}"
-                            IsReadOnly="True" />
-                        <controls:DataGridTemplateColumn Width="*">
-                            <controls:DataGridTemplateColumn.CellTemplate>
-                                <DataTemplate x:DataType="vm:InstanceRowViewModel">
-                                    <NumberBox
-                                        Margin="0,2"
-                                        HorizontalAlignment="Stretch"
-                                        SpinButtonPlacementMode="Inline"
-                                        Value="{x:Bind ClassId, Mode=TwoWay}" />
-                                </DataTemplate>
-                            </controls:DataGridTemplateColumn.CellTemplate>
-                        </controls:DataGridTemplateColumn>
-                    </controls:DataGrid.Columns>
-                </controls:DataGrid>
-            </Grid>
-        </Expander>
-    </Grid>
+            <Expander
+                Header="Instances"
+                IsExpanded="True"
+                HorizontalAlignment="Stretch"
+                HorizontalContentAlignment="Stretch">
+                <StackPanel Spacing="6" HorizontalAlignment="Stretch">
+                    <TextBox
+                        Header="class filter"
+                        PlaceholderText="all"
+                        HorizontalAlignment="Stretch"
+                        Text="{x:Bind ViewModel.ClassFilterText, Mode=TwoWay}" />
+                    <Grid Padding="12,0,8,0" ColumnDefinitions="40,60,*">
+                        <CheckBox
+                            Grid.Column="0"
+                            HorizontalAlignment="Center"
+                            IsThreeState="True"
+                            IsChecked="{x:Bind ViewModel.AllInstancesVisible, Mode=TwoWay}" />
+                        <TextBlock
+                            Grid.Column="1"
+                            VerticalAlignment="Center"
+                            FontWeight="SemiBold"
+                            Text="ROI" />
+                        <TextBlock
+                            Grid.Column="2"
+                            VerticalAlignment="Center"
+                            FontWeight="SemiBold"
+                            Text="Class ID" />
+                    </Grid>
+                    <controls:DataGrid
+                        x:Name="InstanceGrid"
+                        HorizontalAlignment="Stretch"
+                        AutoGenerateColumns="False"
+                        CanUserReorderColumns="False"
+                        CanUserSortColumns="False"
+                        GridLinesVisibility="Horizontal"
+                        HeadersVisibility="None"
+                        SelectionMode="Extended"
+                        LoadingRow="InstanceGrid_LoadingRow">
+                        <controls:DataGrid.Columns>
+                            <controls:DataGridTemplateColumn Width="40">
+                                <controls:DataGridTemplateColumn.CellTemplate>
+                                    <DataTemplate x:DataType="vm:InstanceRowViewModel">
+                                        <CheckBox
+                                            HorizontalAlignment="Center"
+                                            IsChecked="{x:Bind Visible, Mode=TwoWay}" />
+                                    </DataTemplate>
+                                </controls:DataGridTemplateColumn.CellTemplate>
+                            </controls:DataGridTemplateColumn>
+                            <controls:DataGridTextColumn
+                                Width="60"
+                                Binding="{Binding RoiLabel}"
+                                IsReadOnly="True" />
+                            <controls:DataGridTemplateColumn Width="*">
+                                <controls:DataGridTemplateColumn.CellTemplate>
+                                    <DataTemplate x:DataType="vm:InstanceRowViewModel">
+                                        <NumberBox
+                                            Margin="0,2"
+                                            HorizontalAlignment="Stretch"
+                                            SpinButtonPlacementMode="Inline"
+                                            Value="{x:Bind ClassId, Mode=TwoWay}" />
+                                    </DataTemplate>
+                                </controls:DataGridTemplateColumn.CellTemplate>
+                            </controls:DataGridTemplateColumn>
+                        </controls:DataGrid.Columns>
+                    </controls:DataGrid>
+                </StackPanel>
+            </Expander>
+        </StackPanel>
+    </ScrollViewer>
 </UserControl>
