@@ -3,27 +3,29 @@
 from __future__ import annotations
 
 import cv2
-import fastremap
 import numpy as np
 
-from cellpose.utils import masks_to_outlines
+from cellpose.gui.mask_ops import (
+    compute_outlines,
+    ensure_3d_masks,
+    normalize_mask_dtype,
+    remove_cells_from_arrays,
+    renumber_masks,
+)
 
 from .session import SidecarSession
 
-
-def _ensure_3d_masks(masks: np.ndarray) -> np.ndarray:
-    if masks.ndim == 2:
-        return masks[np.newaxis, ...]
-    return masks
-
-
-def _compute_outlines(masks: np.ndarray) -> np.ndarray:
-    masks = _ensure_3d_masks(masks)
-    outpix = np.zeros_like(masks)
-    for z in range(masks.shape[0]):
-        outlines = masks_to_outlines(masks[z])
-        outpix[z] = outlines * masks[z]
-    return outpix
+__all__ = [
+    "apply_masks",
+    "remove_cells",
+    "merge_cells",
+    "add_mask_from_strokes",
+    "compute_outlines",
+    "ensure_3d_masks",
+    "normalize_mask_dtype",
+    "remove_cells_from_arrays",
+    "renumber_masks",
+]
 
 
 def _default_colors(ncells: int) -> np.ndarray:
@@ -33,15 +35,10 @@ def _default_colors(ncells: int) -> np.ndarray:
 
 
 def apply_masks(session: SidecarSession, masks: np.ndarray) -> None:
-    shape = masks.shape
-    if len(fastremap.unique(masks)) != masks.max() + 1:
-        fastremap.renumber(masks, in_place=True)
-        masks = masks.reshape(shape)
-    if masks.ndim == 2:
-        masks = masks[np.newaxis, ...]
-    masks = masks.astype(np.uint16) if masks.max() < 2**16 - 1 else masks.astype(np.uint32)
+    masks = renumber_masks(masks)
+    masks = normalize_mask_dtype(masks)
     session.masks = masks
-    session.outlines = _compute_outlines(masks)
+    session.outlines = compute_outlines(masks)
     ncells = int(masks.max())
     if session.colors is None or len(session.colors) < ncells:
         session.colors = _default_colors(ncells)
@@ -62,26 +59,18 @@ def apply_masks(session: SidecarSession, masks: np.ndarray) -> None:
 def remove_cells(session: SidecarSession, indices: list[int]) -> None:
     if session.masks is None:
         return
-    masks = session.masks.copy()
-    outlines = session.outlines.copy() if session.outlines is not None else None
+    masks, outlines = remove_cells_from_arrays(
+        session.masks, session.outlines, indices
+    )
+    session.masks = masks
+    session.outlines = outlines
     for idx in sorted(indices, reverse=True):
-        if idx <= 0 or idx > masks.max():
-            continue
-        for z in range(masks.shape[0]):
-            masks[z, masks[z] == idx] = 0
-            if outlines is not None:
-                outlines[z, outlines[z] == idx] = 0
-        masks[masks > idx] -= 1
-        if outlines is not None:
-            outlines[outlines > idx] -= 1
         if session.instance_classes is not None and idx - 1 < len(session.instance_classes):
             session.instance_classes = np.delete(session.instance_classes, idx - 1)
         if session.ismanual is not None and idx - 1 < len(session.ismanual):
             session.ismanual = np.delete(session.ismanual, idx - 1)
         if session.colors is not None and idx < len(session.colors) + 1:
             session.colors = np.delete(session.colors, idx - 1, axis=0)
-    session.masks = masks
-    session.outlines = outlines
 
 
 def merge_cells(session: SidecarSession, source_index: int, target_index: int) -> None:

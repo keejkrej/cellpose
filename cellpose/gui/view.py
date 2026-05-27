@@ -1,5 +1,10 @@
 """
-Copyright © 2025 Howard Hughes Medical Institute, Authored by Carsen Stringer, Michael Rariden and Marius Pachitariu.
+Qt view layer for the Cellpose GUI (MVP).
+
+MainView owns widgets and rendering only; user actions delegate to MainPresenter.
+
+Copyright © 2025 Howard Hughes Medical Institute, Authored by Carsen Stringer,
+Michael Rariden and Marius Pachitariu.
 """
 
 import copy
@@ -47,6 +52,7 @@ from ..transforms import normalize99, normalize99_tile, resize_image, smooth_sha
 from ..utils import download_url_to_file
 from . import io, menus, series
 from .dialogs import TrainWindow
+from .model import MainModel
 from .presenter import MainPresenter
 from .widgets import (
     CheckBoxHeader,
@@ -65,6 +71,84 @@ try:
     MATPLOTLIB = True
 except:
     MATPLOTLIB = False
+
+# Legacy attribute names on MainView map to MainModel sub-objects.
+_MODEL_ATTR_MAP: dict[str, tuple[str, str] | None] = {
+    "stack": ("session", "stack"),
+    "stack_filtered": ("session", "stack_filtered"),
+    "cellpix": ("session", "cellpix"),
+    "cellpix_orig": ("session", "cellpix_orig"),
+    "cellpix_resize": ("session", "cellpix_resize"),
+    "outpix": ("session", "outpix"),
+    "outpix_orig": ("session", "outpix_orig"),
+    "outpix_resize": ("session", "outpix_resize"),
+    "flows": ("session", "flows"),
+    "cellcolors": ("session", "cellcolors"),
+    "ismanual": ("session", "ismanual"),
+    "zdraw": ("session", "zdraw"),
+    "layerz": ("session", "layerz"),
+    "restore": ("session", "restore"),
+    "ratio": ("session", "ratio"),
+    "loaded": ("session", "loaded"),
+    "currentZ": ("session", "current_z"),
+    "NZ": ("session", "nz"),
+    "Ly": ("session", "ly"),
+    "Lx": ("session", "lx"),
+    "Ly0": ("session", "ly0"),
+    "Lx0": ("session", "lx0"),
+    "Lyr": ("session", "lyr"),
+    "Lxr": ("session", "lxr"),
+    "saturation": ("session", "saturation"),
+    "track_changes": ("session", "track_changes"),
+    "recompute_masks": ("session", "recompute_masks"),
+    "opacity": ("session", "opacity"),
+    "outcolor": ("session", "outcolor"),
+    "resize": ("session", "resize"),
+    "selected": ("selection", "selected"),
+    "prev_selected": ("selection", "prev_selected"),
+    "selected_cells": ("selection", "selected_cells"),
+    "removed_cell": ("selection", "removed_cell"),
+    "removing_cells_list": ("selection", "removing_cells_list"),
+    "deleting_multiple": ("selection", "deleting_multiple"),
+    "removing_region": ("selection", "removing_region"),
+    "strokes": ("drawing", "strokes"),
+    "current_point_set": ("drawing", "current_point_set"),
+    "in_stroke": ("drawing", "in_stroke"),
+    "stroke_appended": ("drawing", "stroke_appended"),
+    "filename": None,
+    "display_filename": None,
+    "output_filename": None,
+    "series_dataset": None,
+    "series_index": None,
+}
+
+
+def _model_get(view, name: str):
+    target = _MODEL_ATTR_MAP[name]
+    if target is None:
+        if name == "series_dataset":
+            return view.model.series_state.dataset
+        if name == "series_index":
+            return view.model.series_state.record_index
+        return getattr(view.model, name)
+    container, attr = target
+    return getattr(getattr(view.model, container), attr)
+
+
+def _model_set(view, name: str, value):
+    target = _MODEL_ATTR_MAP[name]
+    if target is None:
+        if name == "series_dataset":
+            view.model.series_state.dataset = value
+            return
+        if name == "series_index":
+            view.model.series_state.record_index = value
+            return
+        setattr(view.model, name, value)
+        return
+    container, attr = target
+    setattr(getattr(view.model, container), attr, value)
+
 
 def run(image=None):
     from ..io import logger_setup
@@ -93,16 +177,39 @@ def run(image=None):
     app_icon.addFile(icon_path, QtCore.QSize(256, 256))
     app.setWindowIcon(app_icon)
     app.setStyle("Fusion")
-    MainW(image=image, logger=logger)
+    MainView(image=image, logger=logger)
     ret = app.exec()
     sys.exit(ret)
 
 
-class MainW(QMainWindow):
+class MainView(QMainWindow):
+    """Passive Qt view for the Cellpose GUI MVP stack."""
+
+    def __getattr__(self, name: str):
+        if name in _MODEL_ATTR_MAP:
+            return _model_get(self, name)
+        raise AttributeError(name)
+
+    def __setattr__(self, name: str, value):
+        if name in _MODEL_ATTR_MAP and "model" in self.__dict__:
+            _model_set(self, name, value)
+            if name in ("cellpix", "cellpix_resize"):
+                self._sync_ncells_counter()
+            return
+        super().__setattr__(name, value)
+
+    def _sync_ncells_counter(self):
+        if hasattr(self, "ncells_counter"):
+            self.ncells_counter.set(self.model.ncells)
+
     def __init__(self, image=None, logger=None):
-        super(MainW, self).__init__()
+        super(MainView, self).__init__()
 
         self.logger = logger
+        self.model = MainModel(
+            model_save_folder=os.fspath(models.MODEL_DIR.joinpath("custom")),
+        )
+        self.presenter = MainPresenter(self, self.model)
         pg.setConfigOptions(imageAxisOrder="row-major")
         self.setGeometry(100, 100, 1280, 720)
         self.setWindowTitle(f"cellpose v{version}")
@@ -117,11 +224,6 @@ class MainW(QMainWindow):
         app_icon.addFile(icon_path, QtCore.QSize(64, 64))
         app_icon.addFile(icon_path, QtCore.QSize(256, 256))
         self.setWindowIcon(app_icon)
-
-        self.presenter = MainPresenter(
-            self,
-            model_save_folder=os.fspath(models.MODEL_DIR.joinpath("custom")),
-        )
 
         menus.mainmenu(self)
         menus.editmenu(self)
@@ -201,7 +303,16 @@ class MainW(QMainWindow):
         self.presenter.set_training_parameters(params)
 
     def ncells(self) -> int:
-        return self.ncells_counter.get()
+        return self.model.ncells
+
+    def set_progress(self, value: int) -> None:
+        self.progress.setValue(value)
+
+    def show_message(self, title: str, text: str) -> None:
+        QMessageBox.warning(self, title, text)
+
+    def set_window_title(self, title: str) -> None:
+        self.setWindowTitle(title)
 
     def sync_series_state(self, state):
         self.series_dataset = state.dataset
@@ -659,24 +770,10 @@ class MainW(QMainWindow):
         return "cpsam" if is_cpsam else model_name, not is_cpsam
 
     def run_selected_model(self):
-        model_name, custom = self._selected_segmentation_model()
-        if custom:
-            self.compute_segmentation(custom=True)
-        else:
-            self.compute_segmentation(model_name=model_name)
+        self.presenter.run_selected_model()
 
     def apply_filter(self):
-        self.restore = "filter"
-        normalize_params = self.get_normalize_params()
-        if (
-            normalize_params["sharpen_radius"] == 0
-            and normalize_params["smooth_radius"] == 0
-            and normalize_params["tile_norm_blocksize"] == 0
-        ):
-            print("GUI_ERROR: no filtering settings on (use custom filter settings)")
-            self.restore = None
-            return
-        self.compute_saturation(apply_preprocessing=True)
+        self.presenter.apply_filter()
 
     def model_choose(self, custom=False):
         if custom:
@@ -778,8 +875,8 @@ class MainW(QMainWindow):
         filter_class_id = self.instance_class_filter()
         self._refreshing_instance_table = True
         self.InstanceTable.blockSignals(True)
-        self.InstanceTable.setRowCount(self.ncells_counter.get())
-        for row in range(self.ncells_counter.get()):
+        self.InstanceTable.setRowCount(self.ncells())
+        for row in range(self.ncells()):
             visible_item = QTableWidgetItem()
             visible_item.setFlags(
                 QtCore.Qt.ItemFlag.ItemIsUserCheckable
@@ -824,7 +921,7 @@ class MainW(QMainWindow):
     def _sync_visibility_header_checkbox(self):
         if not hasattr(self, "_visibility_header"):
             return
-        ncells = self.ncells_counter.get()
+        ncells = self.ncells()
         if ncells == 0:
             self._visibility_header.set_check_state(QtCore.Qt.CheckState.Unchecked)
             return
@@ -841,7 +938,7 @@ class MainW(QMainWindow):
     def _toggle_all_instance_visibility(self, state):
         if self._refreshing_instance_table:
             return
-        ncells = self.ncells_counter.get()
+        ncells = self.ncells()
         if ncells == 0:
             return
         if state == QtCore.Qt.CheckState.PartiallyChecked:
@@ -901,7 +998,7 @@ class MainW(QMainWindow):
             io._save_sets_with_check(self)
 
     def toggle_saving(self):
-        if self.ncells_counter > 0:
+        if self.ncells() > 0:
             self.saveSet.setEnabled(True)
             self.savePNG.setEnabled(True)
             self.saveFlows.setEnabled(True)
@@ -915,7 +1012,7 @@ class MainW(QMainWindow):
             self.saveROIs.setEnabled(False)
 
     def toggle_removals(self):
-        if self.ncells_counter > 0:
+        if self.ncells() > 0:
             self.ClearButton.setEnabled(True)
             self.remcell.setEnabled(True)
             self.undo.setEnabled(True)
@@ -939,8 +1036,8 @@ class MainW(QMainWindow):
             self.remove_stroke()
         else:
             # remove previous cell
-            if self.ncells_counter > 0:
-                self.remove_cell(self.ncells_counter.get())
+            if self.ncells() > 0:
+                self.remove_cell(self.ncells())
 
     def undo_remove_action(self):
         self.undo_remove_cell()
@@ -990,66 +1087,7 @@ class MainW(QMainWindow):
         self.navigate_series_from_sliders(axis_name)
 
     def navigate_series_from_sliders(self, axis_name=None, delta=0):
-        if delta != 0:
-            control = self.series_nav_controls.get(axis_name)
-            if control is None:
-                return
-            slider = control["slider"]
-            if not slider.isEnabled():
-                return
-            value = max(0, min(slider.maximum(), slider.value() + delta))
-            old_updating_state = self._updating_series_navigation
-            self._updating_series_navigation = True
-            try:
-                slider.setValue(value)
-            finally:
-                self._updating_series_navigation = old_updating_state
-
-        if (
-            self._updating_series_navigation
-            or self.series_dataset is None
-            or self.series_index is None
-        ):
-            return
-
-        if axis_name is None:
-            return
-
-        try:
-            record_index = series.resolve_series_record_index(
-                self.series_dataset,
-                position=self.series_dataset["axes"]["position"][
-                    self.series_nav_controls["position"]["slider"].value()
-                ],  # Use value() with tracking enabled.
-                time=self.series_dataset["axes"]["time"][
-                    self.series_nav_controls["time"]["slider"].value()
-                ],  # Use value() with tracking enabled.
-                channel=self.series_dataset["axes"]["channel"][
-                    self.series_nav_controls["channel"]["slider"].value()
-                ],  # Use value() with tracking enabled.
-                z=self.series_dataset["axes"]["z"][
-                    self.series_nav_controls["z"]["slider"].value()
-                ],  # Use value() with tracking enabled.
-            )
-        except Exception as e:
-            self.set_series_navigation_state(self.series_dataset, self.series_index)
-            QMessageBox.warning(self, "Load folder with pattern", str(e))
-            return
-
-        if record_index == self.series_index:
-            return
-
-        try:
-            io._load_series_item(
-                self,
-                self.series_dataset,
-                record_index,
-                load_3D=self.load_3D,
-            )
-        except Exception as e:
-            self.set_series_navigation_state(self.series_dataset, self.series_index)
-            print(f"ERROR: {e}")
-            QMessageBox.warning(self, "Load folder with pattern", str(e))
+        self.presenter.navigate_series_from_sliders(axis_name, delta)
 
     def get_files(self):
         if self.series_dataset is not None and self.series_index is not None:
@@ -1066,36 +1104,10 @@ class MainW(QMainWindow):
         return images, idx
 
     def get_prev_image(self):
-        images, idx = self.get_files()
-        idx = (idx - 1) % len(images)
-        if self.series_dataset is not None:
-            try:
-                io._load_series_item(
-                    self, self.series_dataset, idx, load_3D=self.load_3D
-                )
-            except Exception as e:
-                print(f"ERROR: {e}")
-                QMessageBox.warning(self, "Load folder with pattern", str(e))
-        else:
-            io._load_image(self, filename=images[idx])
+        self.presenter.get_prev_image()
 
     def get_next_image(self, load_seg=True):
-        images, idx = self.get_files()
-        idx = (idx + 1) % len(images)
-        if self.series_dataset is not None:
-            try:
-                io._load_series_item(
-                    self,
-                    self.series_dataset,
-                    idx,
-                    load_seg=load_seg,
-                    load_3D=self.load_3D,
-                )
-            except Exception as e:
-                print(f"ERROR: {e}")
-                QMessageBox.warning(self, "Load folder with pattern", str(e))
-        else:
-            io._load_image(self, filename=images[idx], load_seg=load_seg)
+        self.presenter.get_next_image(load_seg=load_seg)
 
     def dragEnterEvent(self, event):
         if event.mimeData().hasUrls():
@@ -1503,21 +1515,7 @@ class MainW(QMainWindow):
         self.update_layer()
 
     def remove_cell(self, idx):
-        if isinstance(idx, (int, np.integer)):
-            idx = [idx]
-        # because the function remove_single_cell updates the state of the cellpix and outpix arrays
-        # by reindexing cells to avoid gaps in the indices, we need to remove the cells in reverse order
-        # so that the indices are correct
-        idx.sort(reverse=True)
-        for i in idx:
-            self.remove_single_cell(i)
-        self.ncells_counter -= len(idx)  # _save_sets uses ncells
-        self.update_layer()
-
-        if self.ncells_counter == 0:
-            self.ClearButton.setEnabled(False)
-        if self.NZ == 1:
-            io._save_sets_with_check(self)
+        self.presenter.remove_cell(idx)
 
     def remove_single_cell(self, idx):
         # remove from manual array
@@ -1804,33 +1802,7 @@ class MainW(QMainWindow):
         self.show()
 
     def add_set(self):
-        if len(self.current_point_set) > 0:
-            while len(self.strokes) > 0:
-                self.remove_stroke(delete_points=False)
-            if len(self.current_point_set[0]) > 8:
-                color = self.colormap[self.ncells_counter.get(), :3]
-                median = self.add_mask(points=self.current_point_set, color=color)
-                if median is not None:
-                    self.removed_cell = []
-                    self.toggle_mask_ops()
-                    self.cellcolors = np.append(
-                        self.cellcolors, color[np.newaxis, :], axis=0
-                    )
-                    self.ismanual = np.append(self.ismanual, True)
-                    self.presenter.append_instance_metadata(
-                        self.default_class_id(), True
-                    )
-                    self.ncells_counter += 1
-                    self.draw_layer()
-                    if self.NZ == 1:
-                        # only save after each cell if single image
-                        io._save_sets_with_check(self)
-            else:
-                print("GUI_ERROR: cell too small, not drawn")
-            self.current_stroke = []
-            self.strokes = []
-            self.current_point_set = []
-            self.update_layer()
+        self.presenter.add_set()
 
     def add_mask(self, points=None, color=(100, 200, 50), dense=True):
         # points is list of strokes
@@ -1991,11 +1963,8 @@ class MainW(QMainWindow):
                 self.cellpix = self.cellpix_orig.copy()
                 self.outpix = self.outpix_orig.copy()
 
-        self.layerz = np.zeros((self.Ly, self.Lx, 4), np.uint8)
-        cellpix = self.cellpix[self.currentZ]
-        visible_pixels = self.visible_cell_pixels(cellpix)
-        self.layerz[..., :3] = self.cellcolors[cellpix, :]
-        self.layerz[..., 3] = self.opacity * visible_pixels.astype(np.uint8)
+        filter_class_id = self.instance_class_filter()
+        self.model.build_layer_rgba(filter_class_id=filter_class_id)
         cZ = self.currentZ
         stroke_z = np.array([s[0][0] for s in self.strokes])
         inZ = np.nonzero(stroke_z == cZ)[0]
@@ -2005,10 +1974,6 @@ class MainW(QMainWindow):
                 self.layerz[stroke[:, 1], stroke[:, 2]] = np.array(
                     [255, 0, 255, 100]
                 )
-
-        self.layerz[(self.outpix[self.currentZ] > 0) & visible_pixels] = np.array(
-            self.outcolor
-        ).astype(np.uint8)
 
     def set_normalize_params(self, normalize_params):
         from cellpose.models import normalize_default
@@ -2151,7 +2116,7 @@ class MainW(QMainWindow):
                 )
 
         if custom or model_name is None or not isinstance(model_name, str):
-            self.model = models.CellposeModel(
+            self.cp_model = models.CellposeModel(
                 gpu=True, pretrained_model=self.current_model_path
             )
         else:
@@ -2160,7 +2125,7 @@ class MainW(QMainWindow):
                 models.MODEL_DIR.joinpath(self.current_model)
             )
 
-            self.model = models.CellposeModel(
+            self.cp_model = models.CellposeModel(
                 gpu=True, pretrained_model=self.current_model
             )
 
@@ -2250,13 +2215,13 @@ class MainW(QMainWindow):
         self.logger.info(f"training new model starting at model {model_type}")
         self.current_model = model_type
 
-        self.model = models.CellposeModel(gpu=True, model_type=model_type)
+        self.cp_model = models.CellposeModel(gpu=True, model_type=model_type)
         save_path = os.fspath(models.MODEL_DIR.joinpath("custom"))
         os.makedirs(save_path, exist_ok=True)
 
         print("GUI_INFO: name of new model: " + self.training_params["model_name"])
         self.new_model_path, train_losses = train.train_seg(
-            self.model.net,
+            self.cp_model.net,
             train_data=self.train_data,
             train_labels=self.train_labels,
             normalize=normalize_params,
@@ -2273,7 +2238,7 @@ class MainW(QMainWindow):
         np.save(str(self.new_model_path) + "_train_losses.npy", train_losses)
         # run model on next image
         io._add_model(self, self.new_model_path)
-        diam_labels = self.model.net.diam_labels.item()  # .copy()
+        diam_labels = self.cp_model.net.diam_labels.item()  # .copy()
         self.new_model_ind = len(self.model_strings)
         self.autorun = True
         self.clear_all()
@@ -2296,192 +2261,13 @@ class MainW(QMainWindow):
         return io._get_train_set(image_names)
 
     def compute_cprob(self):
-        if getattr(self, "recompute_masks", False):
-            segmentation_params = self.get_segmentation_parameters()
-            min_size = (
-                int(self.min_size.text())
-                if not isinstance(self.min_size, int)
-                else self.min_size
-            )
-
-            self.logger.info(
-                "computing masks with cell prob=%0.3f, flow error threshold=%0.3f"
-                % (
-                    segmentation_params["cellprob_threshold"],
-                    segmentation_params["flow_threshold"],
-                )
-            )
-
-            try:
-                dP = self.flows[2].squeeze()
-                cellprob = self.flows[3].squeeze()
-            except IndexError:
-                self.logger.error("Flows don't exist, try running model again.")
-                return
-
-            maski = dynamics.resize_and_compute_masks(
-                dP=dP,
-                cellprob=cellprob,
-                niter=segmentation_params["niter"],
-                do_3D=self.load_3D,
-                min_size=min_size,
-                # max_size_fraction=min_size_fraction, # Leave as default
-                cellprob_threshold=segmentation_params["cellprob_threshold"],
-                flow_threshold=segmentation_params["flow_threshold"],
-            )
-
-            if maski.ndim < 3:
-                maski = maski[np.newaxis, ...]
-            self.logger.info("%d cells found" % (len(np.unique(maski)[1:])))
-            io._masks_to_gui(self, maski, outlines=None)
-            self.show()
+        self.presenter.compute_cprob()
 
     def compute_segmentation(self, custom=False, model_name=None, load_model=True):
-        self.progress.setValue(0)
-        try:
-            tic = time.time()
-            self.clear_all()
-            self.flows = [[], [], []]
-            if load_model:
-                self.initialize_model(model_name=model_name, custom=custom)
-            self.progress.setValue(10)
-            do_3D = self.load_3D
-            stitch_threshold = (
-                float(self.stitch_threshold.text())
-                if not isinstance(self.stitch_threshold, float)
-                else self.stitch_threshold
-            )
-            anisotropy = (
-                float(self.anisotropy.text())
-                if not isinstance(self.anisotropy, float)
-                else self.anisotropy
-            )
-            flow3D_smooth = (
-                float(self.flow3D_smooth.text())
-                if not isinstance(self.flow3D_smooth, float)
-                else self.flow3D_smooth
-            )
-            min_size = (
-                int(self.min_size.text())
-                if not isinstance(self.min_size, int)
-                else self.min_size
-            )
+        self.presenter.compute_segmentation(
+            custom=custom, model_name=model_name, load_model=load_model
+        )
 
-            do_3D = False if stitch_threshold > 0.0 else do_3D
 
-            if self.restore == "filter":
-                data = self.stack_filtered.copy().squeeze()
-            else:
-                data = self.stack.copy().squeeze()
-
-            segmentation_params = self.get_segmentation_parameters()
-
-            normalize_params = self.get_normalize_params()
-            print(normalize_params)
-            try:
-                masks, flows = self.model.eval(
-                    data,
-                    diameter=segmentation_params["diameter"],
-                    cellprob_threshold=segmentation_params["cellprob_threshold"],
-                    flow_threshold=segmentation_params["flow_threshold"],
-                    do_3D=do_3D,
-                    niter=segmentation_params["niter"],
-                    normalize=normalize_params,
-                    stitch_threshold=stitch_threshold,
-                    anisotropy=anisotropy,
-                    flow3D_smooth=flow3D_smooth,
-                    min_size=min_size,
-                    channel_axis=-1,
-                    progress=self.progress,
-                    z_axis=0 if self.NZ > 1 else None,
-                )[:2]
-            except Exception as e:
-                print("NET ERROR: %s" % e)
-                self.progress.setValue(0)
-                return
-
-            self.progress.setValue(75)
-
-            # convert flows to uint8 and resize to original image size
-            flows_new = []
-            flows_new.append(flows[0].copy())  # RGB flow
-            flows_new.append(
-                (np.clip(normalize99(flows[2].copy()), 0, 1) * 255).astype("uint8")
-            )  # cellprob
-            flows_new.append(flows[1].copy())  # XY flows
-            flows_new.append(flows[2].copy())  # original cellprob
-
-            if self.load_3D:
-                if stitch_threshold == 0.0:
-                    flows_new.append((flows[1][0] / 10 * 127 + 127).astype("uint8"))
-                else:
-                    flows_new.append(np.zeros(flows[1][0].shape, dtype="uint8"))
-
-            if not self.load_3D:
-                if self.restore and "upsample" in self.restore:
-                    self.Ly, self.Lx = self.Lyr, self.Lxr
-
-                if flows_new[0].shape[-3:-1] != (self.Ly, self.Lx):
-                    self.flows = []
-                    for j in range(len(flows_new)):
-                        self.flows.append(
-                            resize_image(
-                                flows_new[j],
-                                Ly=self.Ly,
-                                Lx=self.Lx,
-                                interpolation=cv2.INTER_NEAREST,
-                            )
-                        )
-                else:
-                    self.flows = flows_new
-            else:
-                self.flows = []
-                Lz, Ly, Lx = self.NZ, self.Ly, self.Lx
-                Lz0, Ly0, Lx0 = flows_new[0].shape[:3]
-                print("GUI_INFO: resizing flows to original image size")
-                for j in range(len(flows_new)):
-                    flow0 = flows_new[j]
-                    if Ly0 != Ly:
-                        flow0 = resize_image(
-                            flow0,
-                            Ly=Ly,
-                            Lx=Lx,
-                            no_channels=flow0.ndim == 3,
-                            interpolation=cv2.INTER_NEAREST,
-                        )
-                    if Lz0 != Lz:
-                        flow0 = np.swapaxes(
-                            resize_image(
-                                np.swapaxes(flow0, 0, 1),
-                                Ly=Lz,
-                                Lx=Lx,
-                                no_channels=flow0.ndim == 3,
-                                interpolation=cv2.INTER_NEAREST,
-                            ),
-                            0,
-                            1,
-                        )
-                    self.flows.append(flow0)
-
-            # add first axis
-            if self.NZ == 1:
-                masks = masks[np.newaxis, ...]
-                self.flows = [
-                    self.flows[n][np.newaxis, ...] for n in range(len(self.flows))
-                ]
-
-            self.logger.info(
-                "%d cells found with model in %0.3f sec"
-                % (len(np.unique(masks)[1:]), time.time() - tic)
-            )
-            self.progress.setValue(80)
-            z = 0
-
-            io._masks_to_gui(self, masks, outlines=None)
-            self.progress.setValue(100)
-            if not do_3D and not stitch_threshold > 0:
-                self.recompute_masks = True
-            else:
-                self.recompute_masks = False
-        except Exception as e:
-            print("ERROR: %s" % e)
+# Backward-compatible alias used by older scripts and docs.
+MainW = MainView

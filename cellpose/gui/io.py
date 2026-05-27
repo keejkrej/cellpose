@@ -320,6 +320,23 @@ def _initialize_images(parent, image, load_3D=False):
     """
     load_3D = parent.load_3D if load_3D is False else load_3D
 
+    if hasattr(parent, "model"):
+        parent.model.load_image_stack(image, load_3d=load_3D)
+        parent.imask = 0
+        if load_3D:
+            parent.scroll.setMaximum(parent.model.session.nz - 1)
+            parent.scroll.setValue(parent.model.session.current_z)
+            parent.zpos.setText(str(parent.model.session.current_z))
+        parent.clear_all()
+        parent.sliders[0].setValue([0, 255])
+        if not hasattr(parent, "stack_filtered") and parent.restore:
+            print("GUI_INFO: no 'img_restore' found, applying current settings")
+            parent.compute_restore()
+        parent.compute_scale()
+        del image
+        gc.collect()
+        return
+
     parent.stack = image
     print(f"GUI_INFO: image shape: {image.shape}")
     if load_3D:
@@ -566,6 +583,9 @@ def _load_masks(parent, filename=None):
 
 def _masks_to_gui(parent, masks, outlines=None, colors=None):
     """ masks loaded into GUI """
+    if hasattr(parent, "presenter"):
+        parent.presenter.apply_masks_from_io(masks, outlines=outlines, colors=colors)
+        return
     # get unique values
     shape = masks.shape
     if len(fastremap.unique(masks)) != masks.max() + 1:
@@ -720,6 +740,9 @@ def _save_sets(parent):
     """ save masks to *_seg.npy. This function should be used when saving
     is forced, e.g. when clicking the save button. Otherwise, use _save_sets_with_check
     """
+    if hasattr(parent, "presenter"):
+        parent.presenter.save_sets()
+        return
     filename = _get_output_filename(parent)
     base = os.path.splitext(filename)[0]
     segmentation_params = parent.get_segmentation_parameters()
