@@ -33,6 +33,7 @@ public sealed partial class RightSidebarView : UserControl
         if (args.NewValue is MainViewModel newViewModel)
         {
             newViewModel.PropertyChanged += view.OnViewModelPropertyChanged;
+            view.RefreshSegmentationGrid();
             view.RefreshInstanceGrid();
         }
     }
@@ -41,12 +42,27 @@ public sealed partial class RightSidebarView : UserControl
     {
         switch (e.PropertyName)
         {
+            case nameof(MainViewModel.Models):
+            case nameof(MainViewModel.Progress):
+            case nameof(MainViewModel.IsBusy):
+            case nameof(MainViewModel.CanRunSegmentation):
+            case nameof(MainViewModel.RunProgressOpacity):
+                RefreshSegmentationGrid();
+                break;
             case nameof(MainViewModel.Ncells):
             case nameof(MainViewModel.ClassFilterText):
             case nameof(MainViewModel.InstanceRowsRevision):
                 RefreshInstanceGrid();
                 break;
         }
+    }
+
+    private void RefreshSegmentationGrid()
+    {
+        if (ViewModel == null)
+            return;
+
+        SegmentationGrid.ItemsSource = SegmentationParamRowViewModel.CreateRows(ViewModel);
     }
 
     private void InstanceGrid_LoadingRow(object sender, DataGridRowEventArgs e)

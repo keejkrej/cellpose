@@ -11,124 +11,161 @@
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     HorizontalAlignment="Stretch"
     HorizontalContentAlignment="Stretch"
+    VerticalAlignment="Stretch"
+    VerticalContentAlignment="Stretch"
     mc:Ignorable="d">
-    <ScrollViewer HorizontalAlignment="Stretch" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
-        <StackPanel Padding="8" Spacing="8" HorizontalAlignment="Stretch">
-            <Expander Header="Segmentation" IsExpanded="True" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
-                <StackPanel Spacing="8" HorizontalAlignment="Stretch">
-                    <ComboBox
-                        Header="model"
-                        HorizontalAlignment="Stretch"
-                        ItemsSource="{x:Bind ViewModel.Models, Mode=OneWay}"
-                        SelectedIndex="{x:Bind ViewModel.SelectedModelIndex, Mode=TwoWay}" />
-                    <NumberBox
-                        Header="diameter"
-                        HorizontalAlignment="Stretch"
-                        SpinButtonPlacementMode="Inline"
-                        Value="{x:Bind ViewModel.SegmentationParams.Diameter, Mode=TwoWay}" />
-                    <NumberBox
-                        Header="flow threshold"
-                        HorizontalAlignment="Stretch"
-                        SmallChange="0.1"
-                        SpinButtonPlacementMode="Inline"
-                        Value="{x:Bind ViewModel.SegmentationParams.FlowThreshold, Mode=TwoWay}" />
-                    <NumberBox
-                        Header="cellprob threshold"
-                        HorizontalAlignment="Stretch"
-                        SmallChange="0.1"
-                        SpinButtonPlacementMode="Inline"
-                        Value="{x:Bind ViewModel.SegmentationParams.CellprobThreshold, Mode=TwoWay}" />
-                    <NumberBox
-                        Header="norm percentile lower"
-                        HorizontalAlignment="Stretch"
-                        Maximum="100"
-                        Minimum="0"
-                        SmallChange="1"
-                        SpinButtonPlacementMode="Inline"
-                        Value="{x:Bind ViewModel.SegmentationParams.PercentileLow, Mode=TwoWay}" />
-                    <NumberBox
-                        Header="norm percentile upper"
-                        HorizontalAlignment="Stretch"
-                        Maximum="100"
-                        Minimum="0"
-                        SmallChange="1"
-                        SpinButtonPlacementMode="Inline"
-                        Value="{x:Bind ViewModel.SegmentationParams.PercentileHigh, Mode=TwoWay}" />
-                    <NumberBox
-                        Header="niter dynamics"
-                        HorizontalAlignment="Stretch"
-                        SmallChange="1"
-                        SpinButtonPlacementMode="Inline"
-                        Value="{x:Bind ViewModel.SegmentationParams.Niter, Mode=TwoWay}" />
-                    <Grid HorizontalAlignment="Stretch">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="*" />
-                        </Grid.ColumnDefinitions>
-                        <Button
-                            Content="run"
-                            Click="{x:Bind ViewModel.RunSegmentationInvoked}"
-                            IsEnabled="{x:Bind ViewModel.CanRunSegmentation, Mode=OneWay}" />
-                        <ProgressBar
-                            Grid.Column="1"
-                            Margin="8,0,0,0"
-                            Maximum="1"
-                            HorizontalAlignment="Stretch"
-                            Opacity="{x:Bind ViewModel.RunProgressOpacity, Mode=OneWay}"
-                            Value="{x:Bind ViewModel.Progress, Mode=OneWay}" />
-                    </Grid>
-                </StackPanel>
-            </Expander>
+    <Grid MinHeight="0" Padding="8" RowDefinitions="*,*" RowSpacing="8">
+        <Expander
+            Grid.Row="0"
+            MinHeight="0"
+            Header="Segmentation"
+            IsExpanded="True"
+            HorizontalAlignment="Stretch"
+            HorizontalContentAlignment="Stretch"
+            VerticalAlignment="Stretch"
+            VerticalContentAlignment="Stretch">
+            <ScrollViewer
+                HorizontalAlignment="Stretch"
+                HorizontalScrollBarVisibility="Disabled"
+                VerticalScrollBarVisibility="Auto">
+                <controls:DataGrid
+                    x:Name="SegmentationGrid"
+                    HorizontalAlignment="Stretch"
+                    AutoGenerateColumns="False"
+                    CanUserReorderColumns="False"
+                    CanUserResizeColumns="True"
+                    CanUserSortColumns="False"
+                    GridLinesVisibility="Horizontal"
+                    HeadersVisibility="Column"
+                    IsReadOnly="True"
+                    SelectionMode="Single">
+                    <controls:DataGrid.Columns>
+                        <controls:DataGridTextColumn
+                            Header="parameter"
+                            Width="160"
+                            Binding="{Binding Label}"
+                            IsReadOnly="True" />
+                        <controls:DataGridTemplateColumn Header="value" Width="*">
+                            <controls:DataGridTemplateColumn.CellTemplate>
+                                <DataTemplate x:DataType="vm:SegmentationParamRowViewModel">
+                                    <Grid Margin="0,2">
+                                        <ComboBox
+                                            HorizontalAlignment="Stretch"
+                                            ItemsSource="{x:Bind Models, Mode=OneWay}"
+                                            SelectedIndex="{x:Bind SelectedModelIndex, Mode=TwoWay}"
+                                            Visibility="{x:Bind ModelEditorVisibility, Mode=OneWay}" />
+                                        <NumberBox
+                                            HorizontalAlignment="Stretch"
+                                            SmallChange="{x:Bind SmallChange, Mode=OneWay}"
+                                            SpinButtonPlacementMode="Inline"
+                                            Value="{x:Bind NumberValue, Mode=TwoWay}"
+                                            Visibility="{x:Bind GeneralNumberEditorVisibility, Mode=OneWay}" />
+                                        <NumberBox
+                                            HorizontalAlignment="Stretch"
+                                            Maximum="100"
+                                            Minimum="0"
+                                            SmallChange="{x:Bind SmallChange, Mode=OneWay}"
+                                            SpinButtonPlacementMode="Inline"
+                                            Value="{x:Bind NumberValue, Mode=TwoWay}"
+                                            Visibility="{x:Bind PercentileNumberEditorVisibility, Mode=OneWay}" />
+                                        <Grid
+                                            ColumnDefinitions="Auto,*"
+                                            Visibility="{x:Bind RunEditorVisibility, Mode=OneWay}">
+                                            <Button
+                                                Content="run"
+                                                Click="{x:Bind RunSegmentationInvoked}"
+                                                IsEnabled="{x:Bind CanRunSegmentation, Mode=OneWay}" />
+                                            <ProgressBar
+                                                Grid.Column="1"
+                                                Margin="8,0,0,0"
+                                                Maximum="1"
+                                                HorizontalAlignment="Stretch"
+                                                Opacity="{x:Bind RunProgressOpacity, Mode=OneWay}"
+                                                Value="{x:Bind Progress, Mode=OneWay}" />
+                                        </Grid>
+                                    </Grid>
+                                </DataTemplate>
+                            </controls:DataGridTemplateColumn.CellTemplate>
+                        </controls:DataGridTemplateColumn>
+                    </controls:DataGrid.Columns>
+                </controls:DataGrid>
+            </ScrollViewer>
+        </Expander>
 
-            <Expander Header="Instances" IsExpanded="True" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
-                <StackPanel Spacing="8" HorizontalAlignment="Stretch">
-                    <TextBox
-                        Header="class filter"
-                        PlaceholderText="all"
-                        HorizontalAlignment="Stretch"
-                        Text="{x:Bind ViewModel.ClassFilterText, Mode=TwoWay}" />
-                    <controls:DataGrid
-                        x:Name="InstanceGrid"
-                        MinHeight="120"
-                        HorizontalAlignment="Stretch"
-                        AutoGenerateColumns="False"
-                        CanUserReorderColumns="False"
-                        CanUserSortColumns="False"
-                        GridLinesVisibility="Horizontal"
-                        HeadersVisibility="Column"
-                        SelectionMode="Extended"
-                        LoadingRow="InstanceGrid_LoadingRow">
-                        <controls:DataGrid.Columns>
-                            <controls:DataGridCheckBoxColumn
-                                Width="40"
-                                Binding="{Binding Visible, Mode=TwoWay}">
-                                <controls:DataGridCheckBoxColumn.Header>
+        <Expander
+            Grid.Row="1"
+            MinHeight="0"
+            Header="Instances"
+            IsExpanded="True"
+            HorizontalAlignment="Stretch"
+            HorizontalContentAlignment="Stretch"
+            VerticalAlignment="Stretch"
+            VerticalContentAlignment="Stretch">
+            <Grid MinHeight="0" RowDefinitions="Auto,Auto,*" RowSpacing="6">
+                <TextBox
+                    Grid.Row="0"
+                    Header="class filter"
+                    PlaceholderText="all"
+                    HorizontalAlignment="Stretch"
+                    Text="{x:Bind ViewModel.ClassFilterText, Mode=TwoWay}" />
+                <Grid Grid.Row="1" Padding="12,0,8,0" ColumnDefinitions="40,60,*">
+                    <CheckBox
+                        Grid.Column="0"
+                        HorizontalAlignment="Center"
+                        IsThreeState="True"
+                        IsChecked="{x:Bind ViewModel.AllInstancesVisible, Mode=TwoWay}" />
+                    <TextBlock
+                        Grid.Column="1"
+                        VerticalAlignment="Center"
+                        FontWeight="SemiBold"
+                        Text="ROI" />
+                    <TextBlock
+                        Grid.Column="2"
+                        VerticalAlignment="Center"
+                        FontWeight="SemiBold"
+                        Text="Class ID" />
+                </Grid>
+                <controls:DataGrid
+                    x:Name="InstanceGrid"
+                    Grid.Row="2"
+                    MinHeight="0"
+                    HorizontalAlignment="Stretch"
+                    VerticalAlignment="Stretch"
+                    AutoGenerateColumns="False"
+                    CanUserReorderColumns="False"
+                    CanUserSortColumns="False"
+                    GridLinesVisibility="Horizontal"
+                    HeadersVisibility="None"
+                    SelectionMode="Extended"
+                    LoadingRow="InstanceGrid_LoadingRow">
+                    <controls:DataGrid.Columns>
+                        <controls:DataGridTemplateColumn Width="40">
+                            <controls:DataGridTemplateColumn.CellTemplate>
+                                <DataTemplate x:DataType="vm:InstanceRowViewModel">
                                     <CheckBox
                                         HorizontalAlignment="Center"
-                                        IsThreeState="True"
-                                        IsChecked="{x:Bind ViewModel.AllInstancesVisible, Mode=TwoWay}" />
-                                </controls:DataGridCheckBoxColumn.Header>
-                            </controls:DataGridCheckBoxColumn>
-                            <controls:DataGridTextColumn
-                                Header="ROI"
-                                Width="60"
-                                Binding="{Binding RoiLabel}"
-                                IsReadOnly="True" />
-                            <controls:DataGridTemplateColumn Header="Class ID" Width="*">
-                                <controls:DataGridTemplateColumn.CellTemplate>
-                                    <DataTemplate x:DataType="vm:InstanceRowViewModel">
-                                        <NumberBox
-                                            Margin="0,2"
-                                            HorizontalAlignment="Stretch"
-                                            SpinButtonPlacementMode="Inline"
-                                            Value="{x:Bind ClassId, Mode=TwoWay}" />
-                                    </DataTemplate>
-                                </controls:DataGridTemplateColumn.CellTemplate>
-                            </controls:DataGridTemplateColumn>
-                        </controls:DataGrid.Columns>
-                    </controls:DataGrid>
-                </StackPanel>
-            </Expander>
-        </StackPanel>
-    </ScrollViewer>
+                                        IsChecked="{x:Bind Visible, Mode=TwoWay}" />
+                                </DataTemplate>
+                            </controls:DataGridTemplateColumn.CellTemplate>
+                        </controls:DataGridTemplateColumn>
+                        <controls:DataGridTextColumn
+                            Width="60"
+                            Binding="{Binding RoiLabel}"
+                            IsReadOnly="True" />
+                        <controls:DataGridTemplateColumn Width="*">
+                            <controls:DataGridTemplateColumn.CellTemplate>
+                                <DataTemplate x:DataType="vm:InstanceRowViewModel">
+                                    <NumberBox
+                                        Margin="0,2"
+                                        HorizontalAlignment="Stretch"
+                                        SpinButtonPlacementMode="Inline"
+                                        Value="{x:Bind ClassId, Mode=TwoWay}" />
+                                </DataTemplate>
+                            </controls:DataGridTemplateColumn.CellTemplate>
+                        </controls:DataGridTemplateColumn>
+                    </controls:DataGrid.Columns>
+                </controls:DataGrid>
+            </Grid>
+        </Expander>
+    </Grid>
 </UserControl>
