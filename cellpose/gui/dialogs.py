@@ -78,9 +78,6 @@ class TrainWindow(QDialog):
             param_layout.addWidget(self.edits[-1])
             left_column.addLayout(param_layout)
 
-        self.use_norm = QCheckBox("use restored/filtered image")
-        self.use_norm.setChecked(True)
-
         qbtn = QDialogButtonBox.Ok | QDialogButtonBox.Cancel
         self.buttonBox = QDialogButtonBox(qbtn)
         self.buttonBox.accepted.connect(lambda: self.accept(parent))

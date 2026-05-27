@@ -20,7 +20,6 @@ from . import io, series
 from .model import (
     InstanceClasses,
     MainModel,
-    PreprocessingParameters,
     SegmentationParameters,
     SeriesState,
 )
@@ -87,32 +86,6 @@ class MainPresenter:
 
     def segmentation_parameters_dict(self) -> dict[str, Any]:
         return self.segmentation_parameters().to_dict()
-
-    def preprocessing_parameters(self) -> PreprocessingParameters:
-        widgets = self.view.read_preprocessing_widgets()
-        return PreprocessingParameters.from_values(
-            sharpen_radius=float(widgets["sharpen_radius"]),
-            smooth_radius=float(widgets["smooth_radius"]),
-            tile_norm_blocksize=float(widgets["tile_norm_blocksize"]),
-            tile_norm_smooth3D=float(widgets["tile_norm_smooth3D"]),
-            norm3D=bool(widgets["norm3D"]),
-            image_shape=(self.view.Ly, self.view.Lx),
-            invert=bool(widgets.get("invert", False)),
-        )
-
-    def preprocessing_parameters_dict(self) -> dict[str, Any]:
-        return self.preprocessing_parameters().to_dict()
-
-    def set_preprocessing_parameters(self, params: dict[str, Any]) -> None:
-        model_params = PreprocessingParameters.from_values(
-            sharpen_radius=float(params["sharpen_radius"]),
-            smooth_radius=float(params["smooth_radius"]),
-            tile_norm_blocksize=float(params["tile_norm_blocksize"]),
-            tile_norm_smooth3D=float(params["tile_norm_smooth3D"]),
-            norm3D=bool(params["norm3D"]),
-            invert=bool(params.get("invert", False)),
-        )
-        self.view.apply_preprocessing_widgets(model_params)
 
     # ---- instances ----
 
@@ -198,19 +171,6 @@ class MainPresenter:
             self.compute_segmentation(custom=True)
         else:
             self.compute_segmentation(model_name=model_name)
-
-    def apply_filter(self) -> None:
-        self.view.restore = "filter"
-        normalize_params = self.view.get_normalize_params()
-        if (
-            normalize_params["sharpen_radius"] == 0
-            and normalize_params["smooth_radius"] == 0
-            and normalize_params["tile_norm_blocksize"] == 0
-        ):
-            print("GUI_ERROR: no filtering settings on (use custom filter settings)")
-            self.view.restore = None
-            return
-        self.view.compute_saturation(apply_preprocessing=True)
 
     def get_prev_image(self) -> None:
         images, idx = self.view.get_files()

@@ -12,7 +12,6 @@ final class MainViewModel {
     var selectedCell: Int32 = 0
     var showMasks = true
     var showOutlines = true
-    var autosave = true
     var autoloadMasks = false
     var disableAutosave = false
     var imageLoaded = false
@@ -143,7 +142,7 @@ final class MainViewModel {
     }
 
     private func saveSessionIfNeeded() {
-        guard autosave, !disableAutosave, session.imagePath != nil, session.masks != nil else { return }
+        guard !disableAutosave, session.imagePath != nil, session.masks != nil else { return }
         session.segmentation = cloneSegmentationParams()
         session.model = selectedModel
         let path = sessionStore.defaultPath(imagePath: session.imagePath!)

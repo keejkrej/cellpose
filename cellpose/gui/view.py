@@ -48,7 +48,7 @@ from .. import dynamics, models, train, version
 from ..io import get_image_files
 from ..models import normalize_default
 from ..plot import disk
-from ..transforms import normalize99, normalize99_tile, resize_image, smooth_sharpen_img
+from ..transforms import normalize99, resize_image
 from ..utils import download_url_to_file
 from . import io, menus, series
 from .dialogs import TrainWindow
@@ -344,35 +344,6 @@ class MainView(QMainWindow):
         if self.seg_param_root.param("niter").value() != params.niter:
             self.seg_param_root.param("niter").setValue(params.niter)
 
-    def read_preprocessing_widgets(self):
-        return {
-            "sharpen_radius": self.preprocessing_param_root.param("sharpen_radius").value(),
-            "smooth_radius": self.preprocessing_param_root.param("smooth_radius").value(),
-            "tile_norm_blocksize": self.preprocessing_param_root.param(
-                "tile_norm_blocksize"
-            ).value(),
-            "tile_norm_smooth3D": self.preprocessing_param_root.param(
-                "tile_norm_smooth3D"
-            ).value(),
-            "norm3D": self.norm3DCheckBox.isChecked(),
-            "invert": False,
-        }
-
-    def apply_preprocessing_widgets(self, params):
-        self.preprocessing_param_root.param("sharpen_radius").setValue(
-            params.sharpen_radius
-        )
-        self.preprocessing_param_root.param("smooth_radius").setValue(
-            params.smooth_radius
-        )
-        self.preprocessing_param_root.param("tile_norm_blocksize").setValue(
-            params.tile_norm_blocksize
-        )
-        self.preprocessing_param_root.param("tile_norm_smooth3D").setValue(
-            params.tile_norm_smooth3D
-        )
-        self.norm3DCheckBox.setChecked(params.norm3D)
-
     def instance_class_filter_text(self):
         if not hasattr(self, "InstanceClassFilter"):
             return ""
@@ -443,10 +414,6 @@ class MainView(QMainWindow):
         self.ViewDropDown.model().item(3).setEnabled(False)
         self.ViewDropDown.currentIndexChanged.connect(self.update_plot)
         self.satBoxV.addWidget(self.ViewDropDown)
-
-        self.norm3DCheckBox = QCheckBox("norm3D")
-        self.norm3DCheckBox.setChecked(True)
-        self.satBoxV.addWidget(self.norm3DCheckBox)
 
         self.autoSaturationButton = QPushButton("auto saturation")
         self.autoSaturationButton.setEnabled(False)
@@ -629,66 +596,8 @@ class MainView(QMainWindow):
             lambda *_: self.validate_normalization_range()
         )
 
-        self.filterBox = QGroupBox("Preprocessing")
-        self.filterBoxV = QVBoxLayout()
-        self.filterBox.setLayout(self.filterBoxV)
-        self.left_sidebar.addWidget(self.filterBox, b, 0, 1, 9)
-
         self.restore = None
         self.ratio = 1.0
-        filter_buttons_layout = QHBoxLayout()
-        self.reset_filter_button = QPushButton("reset")
-        self.reset_filter_button.setEnabled(False)
-        self.reset_filter_button.clicked.connect(self.clear_restore)
-        filter_buttons_layout.addWidget(self.reset_filter_button)
-        self.apply_filter_button = QPushButton("apply")
-        self.apply_filter_button.setEnabled(False)
-        self.apply_filter_button.clicked.connect(self.apply_filter)
-        filter_buttons_layout.addWidget(self.apply_filter_button)
-
-        self.save_norm = QCheckBox("save restored/filtered image")
-        self.save_norm.setChecked(True)
-
-        self.preprocessing_param_root = Parameter.create(
-            name="preprocessing",
-            type="group",
-            children=[
-                {
-                    "name": "sharpen_radius",
-                    "title": "sharpen radius",
-                    "type": "float",
-                    "value": 0.0,
-                    "step": 1.0,
-                },
-                {
-                    "name": "smooth_radius",
-                    "title": "smooth radius",
-                    "type": "float",
-                    "value": 0.0,
-                    "step": 1.0,
-                },
-                {
-                    "name": "tile_norm_blocksize",
-                    "title": "tile norm blocksize",
-                    "type": "float",
-                    "value": 0.0,
-                    "step": 1.0,
-                },
-                {
-                    "name": "tile_norm_smooth3D",
-                    "title": "tile norm smooth3D",
-                    "type": "float",
-                    "value": 0.0,
-                    "step": 1.0,
-                },
-            ],
-        )
-        self.preprocessing_params_tree = ParameterTree(showHeader=False)
-        self.preprocessing_params_tree.setParameters(
-            self.preprocessing_param_root, showTop=False
-        )
-        self.filterBoxV.addWidget(self.preprocessing_params_tree)
-        self.filterBoxV.addLayout(filter_buttons_layout)
 
         return b
 
@@ -700,12 +609,6 @@ class MainView(QMainWindow):
 
     def get_segmentation_parameters(self):
         return self.presenter.segmentation_parameters_dict()
-
-    def get_preprocessing_parameters(self):
-        return self.presenter.preprocessing_parameters_dict()
-
-    def set_preprocessing_parameters(self, params):
-        self.presenter.set_preprocessing_parameters(params)
 
     def level_change(self, r):
         if self.loaded:
@@ -772,9 +675,6 @@ class MainView(QMainWindow):
     def run_selected_model(self):
         self.presenter.run_selected_model()
 
-    def apply_filter(self):
-        self.presenter.apply_filter()
-
     def model_choose(self, custom=False):
         if custom:
             model_name, is_custom = self._selected_segmentation_model()
@@ -802,8 +702,6 @@ class MainView(QMainWindow):
         for i in range(len(self.StyleButtons)):
             self.StyleButtons[i].setEnabled(True)
 
-        self.reset_filter_button.setEnabled(not self.load_3D)
-        self.apply_filter_button.setEnabled(True)
         self.autoSaturationButton.setEnabled(True)
 
         self.newmodel.setEnabled(True)
@@ -1193,13 +1091,6 @@ class MainView(QMainWindow):
         self.ViewDropDown.model().item(self.ViewDropDown.count() - 1).setEnabled(False)
         self.delete_restore()
 
-        self.clear_all()
-
-        self.filename = []
-        self.presenter.reset_series()
-        self.loaded = False
-        self.recompute_masks = False
-
         self.deleting_multiple = False
         self.removing_cells_list = []
         self.removing_region = False
@@ -1208,17 +1099,19 @@ class MainView(QMainWindow):
         self.selected_cells = []
         self.rect_select_preview = None
         self._rect_select_start = None
+
+        self.clear_all()
+
+        self.filename = []
+        self.presenter.reset_series()
+        self.loaded = False
+        self.recompute_masks = False
+
         self.autoSaturationButton.setEnabled(False)
 
     def delete_restore(self):
         """delete restored imgs but don't reset settings"""
-        if hasattr(self, "stack_filtered"):
-            del self.stack_filtered
-        if hasattr(self, "cellpix_orig"):
-            self.cellpix = self.cellpix_orig.copy()
-            self.outpix = self.outpix_orig.copy()
-            del self.outpix_orig, self.outpix_resize
-            del self.cellpix_orig, self.cellpix_resize
+        self.model.discard_filtered_stack()
 
     def clear_restore(self):
         """delete restored imgs and reset settings"""
@@ -1978,119 +1871,39 @@ class MainView(QMainWindow):
     def set_normalize_params(self, normalize_params):
         from cellpose.models import normalize_default
 
+        merged = {**normalize_default, **normalize_params}
         if self.restore != "filter":
-            keys = list(normalize_params.keys()).copy()
-            for key in keys:
+            for key in merged:
                 if key != "percentile":
-                    normalize_params[key] = normalize_default[key]
-        normalize_params = {**normalize_default, **normalize_params}
-        self.set_preprocessing_parameters(
-            {
-                "sharpen_radius": max(0, normalize_params["sharpen_radius"]),
-                "smooth_radius": max(0, normalize_params["smooth_radius"]),
-                "tile_norm_blocksize": max(0, normalize_params["tile_norm_blocksize"]),
-                "tile_norm_smooth3D": max(0, normalize_params["tile_norm_smooth3D"]),
-                "norm3D": bool(normalize_params["norm3D"]),
-                "invert": bool(normalize_params["invert"]),
-            }
-        )
-        params = self.get_preprocessing_parameters()
-        self.set_preprocessing_parameters(params)
+                    merged[key] = normalize_default[key]
+        self.model.preprocessing_params = merged
 
     def get_normalize_params(self):
         segmentation_params = self.get_segmentation_parameters()
-        preprocessing_params = self.get_preprocessing_parameters()
-        self.set_preprocessing_parameters(preprocessing_params)
-        return {
-            **normalize_default,
-            "percentile": segmentation_params["percentile"],
-            **preprocessing_params,
-        }
+        stored = dict(self.model.preprocessing_params or {})
+        params = {**normalize_default, **stored}
+        params["percentile"] = segmentation_params["percentile"]
+        return params
 
-    def compute_saturation(self, apply_preprocessing=False):
-        norm = self.get_normalize_params()
-        print(norm)
-        sharpen, smooth = norm["sharpen_radius"], norm["smooth_radius"]
-        percentile = norm["percentile"]
-        tile_norm = norm["tile_norm_blocksize"]
-        invert = norm["invert"]
-        norm3D = norm["norm3D"]
-        smooth3D = norm["tile_norm_smooth3D"]
-        tile_norm = norm["tile_norm_blocksize"]
-
-        should_apply_preprocessing = (
-            apply_preprocessing and (sharpen > 0 or smooth > 0 or tile_norm > 0)
-        )
-
-        if should_apply_preprocessing:
-            img_norm = self.stack.copy()
+    def compute_saturation(self):
+        segmentation_params = self.get_segmentation_parameters()
+        percentile = segmentation_params["percentile"]
+        restored_view_index = self.ViewDropDown.count() - 1
+        if (
+            self.ViewDropDown.currentIndex() == restored_view_index
+            and self.stack_filtered is not None
+        ):
+            img_norm = self.stack_filtered
         else:
-            restored_view_index = self.ViewDropDown.count() - 1
-            if (
-                self.ViewDropDown.currentIndex() == restored_view_index
-                and hasattr(self, "stack_filtered")
-            ):
-                img_norm = self.stack_filtered
-            else:
-                img_norm = self.stack
-
-        if should_apply_preprocessing:
-            self.restore = "filter"
-            print(
-                "GUI_INFO: computing filtered image because sharpen > 0 or tile_norm > 0"
-            )
-            print(
-                "GUI_WARNING: will use memory to create filtered image -- make sure to have RAM for this"
-            )
-            img_norm = self.stack.copy()
-            if sharpen > 0 or smooth > 0:
-                img_norm = smooth_sharpen_img(
-                    self.stack, sharpen_radius=sharpen, smooth_radius=smooth
-                )
-
-            if tile_norm > 0:
-                img_norm = normalize99_tile(
-                    img_norm,
-                    blocksize=tile_norm,
-                    lower=percentile[0],
-                    upper=percentile[1],
-                    smooth3D=smooth3D,
-                    norm3D=norm3D,
-                )
-            # convert to 0->255
-            img_norm_min = img_norm.min()
-            img_norm_max = img_norm.max()
-            for c in range(img_norm.shape[-1]):
-                if np.ptp(img_norm[..., c]) > 1e-3:
-                    img_norm[..., c] -= img_norm_min
-                    img_norm[..., c] /= img_norm_max - img_norm_min
-            img_norm *= 255
-            self.stack_filtered = img_norm
-            self.ViewDropDown.model().item(self.ViewDropDown.count() - 1).setEnabled(
-                True
-            )
-            self.ViewDropDown.setCurrentIndex(self.ViewDropDown.count() - 1)
+            img_norm = self.stack
         img_gray = as_gray_image(img_norm)
         self.saturation = [[]]
         if np.ptp(img_gray) > 1e-3:
-            if norm3D:
-                x01 = np.percentile(img_gray, percentile[0])
-                x99 = np.percentile(img_gray, percentile[1])
-                if invert:
-                    x01, x99 = 255.0 - x99, 255.0 - x01
-                for n in range(self.NZ):
-                    self.saturation[0].append([x01, x99])
-            else:
-                for z in range(self.NZ):
-                    if self.NZ > 1:
-                        plane = img_gray[z]
-                    else:
-                        plane = img_gray
-                    x01 = np.percentile(plane, percentile[0])
-                    x99 = np.percentile(plane, percentile[1])
-                    if invert:
-                        x01, x99 = 255.0 - x99, 255.0 - x01
-                    self.saturation[0].append([x01, x99])
+            for z in range(self.NZ):
+                plane = img_gray[z] if self.NZ > 1 else img_gray
+                x01 = np.percentile(plane, percentile[0])
+                x99 = np.percentile(plane, percentile[1])
+                self.saturation[0].append([x01, x99])
         else:
             for n in range(self.NZ):
                 self.saturation[0].append([0, 255.0])

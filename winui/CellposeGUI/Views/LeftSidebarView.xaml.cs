@@ -75,24 +75,6 @@ public sealed partial class LeftSidebarView : UserControl
             UpdateGraySliderLabels();
         };
 
-        ShowMasksToggle.Toggled += (_, _) =>
-        {
-            if (_viewModel != null)
-                _viewModel.ShowMasks = ShowMasksToggle.IsOn;
-        };
-
-        ShowOutlinesToggle.Toggled += (_, _) =>
-        {
-            if (_viewModel != null)
-                _viewModel.ShowOutlines = ShowOutlinesToggle.IsOn;
-        };
-
-        AutosaveToggle.Toggled += (_, _) =>
-        {
-            if (_viewModel != null)
-                _viewModel.Autosave = AutosaveToggle.IsOn;
-        };
-
         DefaultClassBox.ValueChanged += (_, e) =>
         {
             if (_viewModel != null)
@@ -222,9 +204,6 @@ public sealed partial class LeftSidebarView : UserControl
         UpdateControlStates();
         RefreshAxisRows();
 
-        ShowMasksToggle.IsOn = _viewModel.ShowMasks;
-        ShowOutlinesToggle.IsOn = _viewModel.ShowOutlines;
-        AutosaveToggle.IsOn = _viewModel.Autosave;
         DefaultClassBox.Value = _viewModel.DefaultClassId;
     }
 

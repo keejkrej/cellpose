@@ -60,20 +60,6 @@ public sealed class SegmentationParameters
     public bool Do3D { get; set; }
 }
 
-public sealed class PreprocessingParameters
-{
-    [JsonPropertyName("sharpen_radius")]
-    public double SharpenRadius { get; set; }
-    [JsonPropertyName("smooth_radius")]
-    public double SmoothRadius { get; set; }
-    [JsonPropertyName("tile_norm_blocksize")]
-    public double TileNormBlocksize { get; set; }
-    [JsonPropertyName("tile_norm_smooth3D")]
-    public double TileNormSmooth3D { get; set; }
-    [JsonPropertyName("norm3D")]
-    public bool Norm3D { get; set; } = true;
-}
-
 public sealed class DisplayParameters : ObservableObject
 {
     private double _grayLow;

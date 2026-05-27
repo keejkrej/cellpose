@@ -68,22 +68,6 @@ struct SegmentationParameters: Codable, Equatable {
     }
 }
 
-struct PreprocessingParameters: Codable, Equatable {
-    var sharpenRadius: Double = 0
-    var smoothRadius: Double = 0
-    var tileNormBlocksize: Double = 0
-    var tileNormSmooth3D: Double = 0
-    var norm3D: Bool = true
-
-    enum CodingKeys: String, CodingKey {
-        case sharpenRadius = "sharpen_radius"
-        case smoothRadius = "smooth_radius"
-        case tileNormBlocksize = "tile_norm_blocksize"
-        case tileNormSmooth3D = "tile_norm_smooth3D"
-        case norm3D = "norm3D"
-    }
-}
-
 struct DisplayParameters: Equatable {
     var grayLow: Double = 0
     var grayHigh: Double = 255

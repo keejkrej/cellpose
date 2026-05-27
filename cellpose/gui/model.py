@@ -118,55 +118,6 @@ class SegmentationParameters:
         }
 
 
-@dataclass(frozen=True)
-class PreprocessingParameters:
-    sharpen_radius: float
-    smooth_radius: float
-    tile_norm_blocksize: float
-    tile_norm_smooth3D: float
-    norm3D: bool
-    invert: bool = False
-
-    @classmethod
-    def from_values(
-        cls,
-        sharpen_radius: float,
-        smooth_radius: float,
-        tile_norm_blocksize: float,
-        tile_norm_smooth3D: float,
-        norm3D: bool,
-        image_shape: tuple[int, int] | None = None,
-        invert: bool = False,
-    ) -> "PreprocessingParameters":
-        blocksize = max(0, float(tile_norm_blocksize))
-        if image_shape is not None:
-            ly, lx = image_shape
-            if blocksize > ly and blocksize > lx:
-                print(
-                    "GUI_ERROR: tile size (tile_norm) bigger than both image "
-                    "dimensions, disabling"
-                )
-                blocksize = 0
-        return cls(
-            sharpen_radius=max(0, float(sharpen_radius)),
-            smooth_radius=max(0, float(smooth_radius)),
-            tile_norm_blocksize=blocksize,
-            tile_norm_smooth3D=max(0, float(tile_norm_smooth3D)),
-            norm3D=bool(norm3D),
-            invert=bool(invert),
-        )
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "sharpen_radius": self.sharpen_radius,
-            "smooth_radius": self.smooth_radius,
-            "tile_norm_blocksize": self.tile_norm_blocksize,
-            "tile_norm_smooth3D": self.tile_norm_smooth3D,
-            "norm3D": self.norm3D,
-            "invert": self.invert,
-        }
-
-
 @dataclass
 class InstanceClasses:
     values: np.ndarray = field(

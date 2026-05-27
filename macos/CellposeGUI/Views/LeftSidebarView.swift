@@ -52,11 +52,6 @@ struct LeftSidebarView: View {
 
                 SidebarPanel(title: "Drawing") {
                     HStack {
-                        Toggle("masks", isOn: $viewModel.showMasks)
-                        Toggle("outlines", isOn: $viewModel.showOutlines)
-                        Toggle("auto", isOn: $viewModel.autosave)
-                    }
-                    HStack {
                         Text("default class")
                         TextField("0", value: $viewModel.defaultClassID, format: .number)
                             .frame(width: 60)

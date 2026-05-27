@@ -29,7 +29,6 @@ public sealed class MainViewModel : ObservableObject
     private int _selectedCell;
     private bool _showMasks = true;
     private bool _showOutlines = true;
-    private bool _autosave = true;
     private bool _autoloadMasks;
     private bool _disableAutosave;
     private bool _imageLoaded;
@@ -124,12 +123,6 @@ public sealed class MainViewModel : ObservableObject
     {
         get => _showOutlines;
         set => SetProperty(ref _showOutlines, value);
-    }
-
-    public bool Autosave
-    {
-        get => _autosave;
-        set => SetProperty(ref _autosave, value);
     }
 
     public bool AutoloadMasks
@@ -383,7 +376,7 @@ public sealed class MainViewModel : ObservableObject
 
     private void SaveSessionIfNeeded()
     {
-        if (!_autosave || _disableAutosave || _session.ImagePath == null || _session.Masks == null)
+        if (_disableAutosave || _session.ImagePath == null || _session.Masks == null)
             return;
 
         _session.Segmentation = CloneSegmentationParams();
