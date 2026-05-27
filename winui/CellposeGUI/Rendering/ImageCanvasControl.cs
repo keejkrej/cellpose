@@ -237,23 +237,36 @@ public sealed class ImageCanvasControl : Grid
         stream.Position = 0;
         stream.ReadExactly(pixels);
 
+        const byte outlineR = 200;
+        const byte outlineG = 200;
+        const byte outlineB = 255;
+        const float outlineAlpha = 200f / 255f;
+
         for (var y = 0; y < masks.Height; y++)
         {
             for (var x = 0; x < masks.Width; x++)
             {
-                var label = viewModel.ShowOutlines
-                    ? masks.OutlineLabels?[y * masks.Width + x] ?? 0
-                    : masks.LabelAt(x, y);
-                if (label <= 0 || !viewModel.IsInstanceLabelVisible(label))
-                    continue;
-
-                var color = masks.ColorAt(x, y);
-                if (color == null)
-                    continue;
-
-                var alpha = label == viewModel.SelectedCell ? 0.75f : color.Value.Alpha;
                 var offset = (y * masks.Width + x) * 4;
-                BlendPixel(pixels, offset, color.Value.R, color.Value.G, color.Value.B, alpha);
+                var fillLabel = masks.LabelAt(x, y);
+
+                if (viewModel.ShowMasks &&
+                    fillLabel > 0 &&
+                    viewModel.IsInstanceLabelVisible(fillLabel) &&
+                    masks.ColorAt(x, y) is { } fillColor)
+                {
+                    var alpha = fillLabel == viewModel.SelectedCell ? 0.75f : fillColor.Alpha;
+                    BlendPixel(pixels, offset, fillColor.R, fillColor.G, fillColor.B, alpha);
+                }
+
+                if (!viewModel.ShowOutlines)
+                    continue;
+
+                var outlineLabel = masks.OutlineLabels?[y * masks.Width + x] ?? 0;
+                if (outlineLabel <= 0 || !viewModel.IsInstanceLabelVisible(outlineLabel))
+                    continue;
+
+                var outlinePixelAlpha = outlineLabel == viewModel.SelectedCell ? 0.85f : outlineAlpha;
+                BlendPixel(pixels, offset, outlineR, outlineG, outlineB, outlinePixelAlpha);
             }
         }
 
@@ -301,7 +314,9 @@ public sealed class ImageCanvasControl : Grid
             return null;
 
         var x = (int)(localX / (rect.Width / image.Width));
-        var y = (int)((rect.Height - localY) / (rect.Height / image.Height));
+        var y = (int)(localY / (rect.Height / image.Height));
+        x = Math.Clamp(x, 0, image.Width - 1);
+        y = Math.Clamp(y, 0, image.Height - 1);
         return new Point(x, y);
     }
 

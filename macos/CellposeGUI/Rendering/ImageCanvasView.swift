@@ -117,12 +117,10 @@ final class ImageCanvasNSView: NSView {
 
         for y in 0 ..< height {
             for x in 0 ..< width {
-                let label = showOutlines
-                    ? (masks.outlineLabels?[y * width + x] ?? 0)
-                    : masks.labels[y * width + x]
-                guard label > 0 else { continue }
-                if let color = masks.color(at: x, y: y) {
-                    let alpha: CGFloat = label == selectedCell ? 0.75 : CGFloat(color.3)
+                let fillLabel = masks.labels[y * width + x]
+
+                if showMasks, fillLabel > 0, let color = masks.color(at: x, y: y) {
+                    let alpha: CGFloat = fillLabel == selectedCell ? 0.75 : CGFloat(color.3)
                     context.setFillColor(
                         red: CGFloat(color.0) / 255,
                         green: CGFloat(color.1) / 255,
@@ -137,6 +135,20 @@ final class ImageCanvasNSView: NSView {
                     )
                     context.fill(cellRect)
                 }
+
+                guard showOutlines else { continue }
+                let outlineLabel = masks.outlineLabels?[y * width + x] ?? 0
+                guard outlineLabel > 0 else { continue }
+
+                let outlineAlpha: CGFloat = outlineLabel == selectedCell ? 0.85 : 200.0 / 255.0
+                context.setFillColor(red: 200.0 / 255, green: 200.0 / 255, blue: 1, alpha: outlineAlpha)
+                let outlineRect = NSRect(
+                    x: rect.minX + CGFloat(x) * pixelWidth,
+                    y: rect.minY + CGFloat(height - y - 1) * pixelHeight,
+                    width: max(pixelWidth, 1),
+                    height: max(pixelHeight, 1)
+                )
+                context.fill(outlineRect)
             }
         }
     }
