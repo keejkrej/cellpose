@@ -16,6 +16,7 @@ import numpy as np
 os.environ.setdefault("PYQTGRAPH_QT_LIB", "PySide6")
 from PySide6 import QtCore, QtGui
 from PySide6.QtWidgets import (
+    QAbstractItemView,
     QApplication,
     QCheckBox,
     QComboBox,
@@ -48,6 +49,7 @@ from . import io, menus, series
 from .dialogs import TrainWindow
 from .viewmodel import MainViewModel, ObservableVariable
 from .widgets import (
+    CheckBoxHeader,
     ImageDraw,
     SeriesAxisSlider,
     Slider,
@@ -152,6 +154,7 @@ class MainW(QMainWindow):
         self.win.scene().sigMouseClicked.connect(self.plot_clicked)
         self.win.scene().sigMouseMoved.connect(self.mouse_moved)
         self.make_viewbox()
+        self.win.scene().installEventFilter(self)
         bwrmap = make_bwr()
         self.bwr = bwrmap.getLookupTable(start=0.0, stop=255.0, alpha=False)
         if MATPLOTLIB:
@@ -298,32 +301,8 @@ class MainW(QMainWindow):
         self.drawBoxV = QVBoxLayout()
         self.drawBox.setLayout(self.drawBoxV)
         self.right_sidebar.addWidget(self.drawBox, 1, 0, 1, 1)
-        self.autosave = True
 
         self.brush_size = 1
-        draw_checks = QHBoxLayout()
-        self.drawBoxV.addLayout(draw_checks)
-
-        # turn off masks
-        self.layer_off = False
-        self.masksOn = True
-        self.MCheckBox = QCheckBox("masks")
-        self.MCheckBox.setChecked(True)
-        self.MCheckBox.toggled.connect(self.toggle_masks)
-        draw_checks.addWidget(self.MCheckBox)
-
-        # turn off outlines
-        self.outlinesOn = True
-        self.OCheckBox = QCheckBox("outlines")
-        draw_checks.addWidget(self.OCheckBox)
-        self.OCheckBox.setChecked(True)
-        self.OCheckBox.toggled.connect(self.toggle_masks)
-
-        self.SCheckBox = QCheckBox("auto")
-        self.SCheckBox.setChecked(True)
-        self.SCheckBox.toggled.connect(self.autosave_on)
-        self.SCheckBox.setEnabled(True)
-        draw_checks.addWidget(self.SCheckBox)
 
         default_class_layout = QHBoxLayout()
         default_class_label = QLabel("default class")
@@ -335,6 +314,17 @@ class MainW(QMainWindow):
         default_class_layout.addWidget(default_class_label)
         default_class_layout.addWidget(self.DefaultClassEdit)
         self.drawBoxV.addLayout(default_class_layout)
+
+        select_layout = QHBoxLayout()
+        self.RectSelectButton = QPushButton("select")
+        self.RectSelectButton.setCheckable(True)
+        self.RectSelectButton.setEnabled(False)
+        self.RectSelectButton.setToolTip(
+            "Draw a rectangle on the canvas to select cells fully inside it"
+        )
+        self.RectSelectButton.toggled.connect(self.toggle_rect_select_mode)
+        select_layout.addWidget(self.RectSelectButton)
+        self.drawBoxV.addLayout(select_layout)
 
         b += 1
         self.segBox = QGroupBox("Segmentation")
@@ -383,11 +373,22 @@ class MainW(QMainWindow):
         self.instanceBoxV.addLayout(instance_filter_layout)
 
         self._refreshing_instance_table = False
-        self.InstanceTable = QTableWidget(0, 2)
-        self.InstanceTable.setHorizontalHeaderLabels(["ROI", "Class ID"])
-        self.InstanceTable.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        self._syncing_table_selection = False
+        self.InstanceTable = QTableWidget(0, 3)
+        visibility_header = CheckBoxHeader(QtCore.Qt.Orientation.Horizontal, self.InstanceTable)
+        visibility_header.checkboxClicked.connect(self._toggle_all_instance_visibility)
+        self.InstanceTable.setHorizontalHeader(visibility_header)
+        self.InstanceTable.setHorizontalHeaderLabels(["", "ROI", "Class ID"])
+        self._visibility_header = visibility_header
+        self.InstanceTable.horizontalHeader().setSectionResizeMode(0, QHeaderView.Fixed)
+        self.InstanceTable.setColumnWidth(0, 32)
+        self.InstanceTable.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
+        self.InstanceTable.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
         self.InstanceTable.verticalHeader().setVisible(False)
-        self.InstanceTable.itemChanged.connect(self.set_instance_class_from_table)
+        self.InstanceTable.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.InstanceTable.setSelectionMode(QAbstractItemView.ExtendedSelection)
+        self.InstanceTable.itemChanged.connect(self.on_instance_table_item_changed)
+        self.InstanceTable.itemSelectionChanged.connect(self.select_cell_from_table)
         self.instanceBoxV.addWidget(self.InstanceTable)
 
         self.progress = QProgressBar(self)
@@ -644,11 +645,8 @@ class MainW(QMainWindow):
         if event.key() == QtCore.Qt.Key_Minus or event.key() == QtCore.Qt.Key_Equal:
             self.p0.keyPressEvent(event)
 
-    def autosave_on(self):
-        if self.SCheckBox.isChecked():
-            self.autosave = True
-        else:
-            self.autosave = False
+    def autosave_enabled(self):
+        return not self.disableAutosave.isChecked()
 
     def default_class_id(self):
         text = self.DefaultClassEdit.text().strip()
@@ -731,6 +729,10 @@ class MainW(QMainWindow):
         self.saveFlows.setEnabled(False)
         self.saveOutlines.setEnabled(False)
         self.saveROIs.setEnabled(False)
+        if hasattr(self, "RectSelectButton"):
+            self.RectSelectButton.setEnabled(False)
+            if self.RectSelectButton.isChecked():
+                self.RectSelectButton.setChecked(False)
 
     def toggle_mask_ops(self):
         self.update_layer()
@@ -761,35 +763,143 @@ class MainW(QMainWindow):
         self.draw_layer()
         self.update_layer()
 
+    def _ensure_instance_visible(self):
+        ncells = self.ncells.get()
+        current_values = getattr(self, "instance_visible", None)
+        self.instance_visible = self.view_model.ensure_instance_visible(
+            ncells, current_values=current_values
+        )
+
+    def set_instance_visible(self, instance_visible=None):
+        self.instance_visible = self.view_model.set_instance_visible(
+            self.ncells.get(), instance_visible
+        )
+        self.refresh_instance_table()
+
     def visible_cell_pixels(self, cellpix):
         filter_class_id = self.instance_class_filter()
         self._ensure_instance_classes()
-        return self.view_model.visible_cell_pixels(cellpix, filter_class_id)
+        self._ensure_instance_visible()
+        return self.view_model.visible_cell_pixels(
+            cellpix, filter_class_id, self.instance_visible
+        )
 
     def refresh_instance_table(self):
         if not hasattr(self, "InstanceTable"):
             return
         self._ensure_instance_classes()
+        self._ensure_instance_visible()
         filter_class_id = self.instance_class_filter()
         self._refreshing_instance_table = True
         self.InstanceTable.blockSignals(True)
         self.InstanceTable.setRowCount(self.ncells.get())
         for row in range(self.ncells.get()):
+            visible_item = QTableWidgetItem()
+            visible_item.setFlags(
+                QtCore.Qt.ItemFlag.ItemIsUserCheckable
+                | QtCore.Qt.ItemFlag.ItemIsEnabled
+            )
+            visible_item.setCheckState(
+                QtCore.Qt.CheckState.Checked
+                if self.instance_visible[row]
+                else QtCore.Qt.CheckState.Unchecked
+            )
             roi_item = QTableWidgetItem(str(row + 1))
-            roi_item.setFlags(roi_item.flags() & ~QtCore.Qt.ItemIsEditable)
+            roi_item.setFlags(roi_item.flags() & ~QtCore.Qt.ItemFlag.ItemIsEditable)
             class_item = QTableWidgetItem(str(int(self.instance_classes[row])))
-            self.InstanceTable.setItem(row, 0, roi_item)
-            self.InstanceTable.setItem(row, 1, class_item)
+            self.InstanceTable.setItem(row, 0, visible_item)
+            self.InstanceTable.setItem(row, 1, roi_item)
+            self.InstanceTable.setItem(row, 2, class_item)
             self.InstanceTable.setRowHidden(
                 row,
                 filter_class_id is not None
                 and int(self.instance_classes[row]) != filter_class_id,
             )
         self.InstanceTable.blockSignals(False)
+        if self.selected_cells:
+            self._syncing_table_selection = True
+            self.InstanceTable.blockSignals(True)
+            self.InstanceTable.clearSelection()
+            for idx in self.selected_cells:
+                row = idx - 1
+                if row < self.InstanceTable.rowCount():
+                    self.InstanceTable.selectRow(row)
+            self.InstanceTable.blockSignals(False)
+            self._syncing_table_selection = False
+        elif self.selected > 0 and self.selected - 1 < self.InstanceTable.rowCount():
+            self._syncing_table_selection = True
+            self.InstanceTable.blockSignals(True)
+            self.InstanceTable.selectRow(self.selected - 1)
+            self.InstanceTable.blockSignals(False)
+            self._syncing_table_selection = False
         self._refreshing_instance_table = False
+        self._sync_visibility_header_checkbox()
+
+    def _sync_visibility_header_checkbox(self):
+        if not hasattr(self, "_visibility_header"):
+            return
+        ncells = self.ncells.get()
+        if ncells == 0:
+            self._visibility_header.set_check_state(QtCore.Qt.CheckState.Unchecked)
+            return
+        self._ensure_instance_visible()
+        visible_count = int(self.instance_visible[:ncells].sum())
+        if visible_count == 0:
+            state = QtCore.Qt.CheckState.Unchecked
+        elif visible_count == ncells:
+            state = QtCore.Qt.CheckState.Checked
+        else:
+            state = QtCore.Qt.CheckState.PartiallyChecked
+        self._visibility_header.set_check_state(state)
+
+    def _toggle_all_instance_visibility(self, state):
+        if self._refreshing_instance_table:
+            return
+        ncells = self.ncells.get()
+        if ncells == 0:
+            return
+        self._ensure_instance_visible()
+        if state == QtCore.Qt.CheckState.PartiallyChecked:
+            visible = True
+        else:
+            visible = state == QtCore.Qt.CheckState.Checked
+        self.instance_visible[:ncells] = visible
+        self._refreshing_instance_table = True
+        for row in range(ncells):
+            item = self.InstanceTable.item(row, 0)
+            if item is not None:
+                item.setCheckState(
+                    QtCore.Qt.CheckState.Checked
+                    if visible
+                    else QtCore.Qt.CheckState.Unchecked
+                )
+        self._refreshing_instance_table = False
+        self._sync_visibility_header_checkbox()
+        self.draw_layer()
+        self.update_layer()
+
+    def on_instance_table_item_changed(self, item):
+        column = item.column()
+        if column == 0:
+            self.set_instance_visible_from_table(item)
+        elif column == 2:
+            self.set_instance_class_from_table(item)
+
+    def set_instance_visible_from_table(self, item):
+        if self._refreshing_instance_table:
+            return
+        row = item.row()
+        self._ensure_instance_visible()
+        if row >= len(self.instance_visible):
+            return
+        visible = item.checkState() == QtCore.Qt.CheckState.Checked
+        self.instance_visible = self.view_model.set_instance_visible_row(row, visible)
+        self._sync_visibility_header_checkbox()
+        self.draw_layer()
+        self.update_layer()
 
     def set_instance_class_from_table(self, item):
-        if self._refreshing_instance_table or item.column() != 1:
+        if self._refreshing_instance_table or item.column() != 2:
             return
         row = item.row()
         self._ensure_instance_classes()
@@ -831,10 +941,16 @@ class MainW(QMainWindow):
             self.ClearButton.setEnabled(True)
             self.remcell.setEnabled(True)
             self.undo.setEnabled(True)
+            if hasattr(self, "RectSelectButton"):
+                self.RectSelectButton.setEnabled(True)
         else:
             self.ClearButton.setEnabled(False)
             self.remcell.setEnabled(False)
             self.undo.setEnabled(False)
+            if hasattr(self, "RectSelectButton"):
+                self.RectSelectButton.setEnabled(False)
+                if self.RectSelectButton.isChecked():
+                    self.RectSelectButton.setChecked(False)
 
     def remove_action(self):
         if self.selected > 0:
@@ -1016,27 +1132,6 @@ class MainW(QMainWindow):
         else:
             io._load_image(self, filename=files[0], load_seg=True, load_3D=self.load_3D)
 
-    def toggle_masks(self):
-        if self.MCheckBox.isChecked():
-            self.masksOn = True
-        else:
-            self.masksOn = False
-        if self.OCheckBox.isChecked():
-            self.outlinesOn = True
-        else:
-            self.outlinesOn = False
-        if not self.masksOn and not self.outlinesOn:
-            self.p0.removeItem(self.layer)
-            self.layer_off = True
-        else:
-            if self.layer_off:
-                self.p0.addItem(self.layer)
-            self.draw_layer()
-            self.update_layer()
-        if self.loaded:
-            self.update_plot()
-            self.update_layer()
-
     def make_viewbox(self):
         self.p0 = ViewBoxNoRightDrag(
             parent=self,
@@ -1061,6 +1156,7 @@ class MainW(QMainWindow):
         self.p0.addItem(self.img)
         self.p0.addItem(self.layer)
         self.p0.addItem(self.scale)
+        self.selection_box = None
 
     def reset(self):
         # ---- start sets of points ---- #
@@ -1119,6 +1215,10 @@ class MainW(QMainWindow):
         self.removing_cells_list = []
         self.removing_region = False
         self.remove_roi_obj = None
+        self.rect_select_mode = False
+        self.selected_cells = []
+        self.rect_select_preview = None
+        self._rect_select_start = None
         self.autoSaturationButton.setEnabled(False)
 
     def delete_restore(self):
@@ -1145,6 +1245,7 @@ class MainW(QMainWindow):
     def clear_all(self):
         self.prev_selected = 0
         self.selected = 0
+        self.selected_cells = []
         if self.restore and "upsample" in self.restore:
             self.layerz = 0 * np.ones((self.Lyr, self.Lxr, 4), np.uint8)
             self.cellpix = np.zeros((self.NZ, self.Lyr, self.Lxr), np.uint16)
@@ -1160,26 +1261,243 @@ class MainW(QMainWindow):
 
         self.cellcolors = np.array([255, 255, 255])[np.newaxis, :]
         self.instance_classes = np.zeros(0, dtype=np.int32)
+        self.instance_visible = np.zeros(0, dtype=bool)
         self.ncells.reset()
         self.toggle_removals()
         self.update_scale()
         self.update_layer()
         self.refresh_instance_table()
+        self._clear_selection_boxes()
+        self._clear_rect_select_preview()
+
+    def _cell_bounds(self, idx, margin=2):
+        cellpix = self.cellpix[self.currentZ]
+        mask = cellpix == idx
+        if not np.any(mask):
+            return None
+        ar, ac = np.nonzero(mask)
+        y0 = max(0, int(ar.min()) - margin)
+        y1 = min(self.Ly - 1, int(ar.max()) + margin)
+        x0 = max(0, int(ac.min()) - margin)
+        x1 = min(self.Lx - 1, int(ac.max()) + margin)
+        return x0, y0, x1, y1
+
+    def _ensure_selection_box(self):
+        if self.selection_box is None:
+            pen = pg.mkPen(
+                color=(255, 255, 0),
+                width=2,
+                style=QtCore.Qt.PenStyle.DashLine,
+            )
+            self.selection_box = pg.PlotCurveItem(pen=pen)
+            self.selection_box.setZValue(10)
+            self.p0.addItem(self.selection_box)
+
+    def _clear_selection_boxes(self):
+        if self.selection_box is not None:
+            self.selection_box.setData([], [])
+
+    def _update_selection_boxes(self):
+        if not self.loaded:
+            self._clear_selection_boxes()
+            return
+
+        indices = self.selected_cells if self.selected_cells else (
+            [self.selected] if self.selected > 0 else []
+        )
+        if not indices:
+            self._clear_selection_boxes()
+            return
+
+        xs = []
+        ys = []
+        for idx in indices:
+            bounds = self._cell_bounds(idx)
+            if bounds is None:
+                continue
+            x0, y0, x1, y1 = bounds
+            xs.extend([x0, x1, x1, x0, x0, np.nan])
+            ys.extend([y0, y0, y1, y1, y0, np.nan])
+
+        if not xs:
+            self._clear_selection_boxes()
+            return
+
+        self._ensure_selection_box()
+        self.selection_box.setData(xs[:-1], ys[:-1])
+
+    def _ensure_rect_select_preview(self):
+        if self.rect_select_preview is None:
+            pen = pg.mkPen(
+                color=(0, 255, 255),
+                width=2,
+                style=QtCore.Qt.PenStyle.DashLine,
+            )
+            self.rect_select_preview = pg.PlotCurveItem(pen=pen)
+            self.rect_select_preview.setZValue(11)
+            self.p0.addItem(self.rect_select_preview)
+
+    def _clear_rect_select_preview(self):
+        if self.rect_select_preview is not None:
+            self.rect_select_preview.setData([], [])
+
+    def _normalize_rect(self, x0, y0, x1, y1):
+        x0, x1 = sorted([int(x0), int(x1)])
+        y0, y1 = sorted([int(y0), int(y1)])
+        x0 = max(0, min(self.Lx - 1, x0))
+        x1 = max(0, min(self.Lx, x1))
+        y0 = max(0, min(self.Ly - 1, y0))
+        y1 = max(0, min(self.Ly, y1))
+        if x1 <= x0 or y1 <= y0:
+            return None
+        return x0, y0, x1, y1
+
+    def _set_rect_preview(self, x0, y0, x1, y1):
+        bounds = self._normalize_rect(x0, y0, x1, y1)
+        if bounds is None:
+            self._clear_rect_select_preview()
+            return
+        x0, y0, x1, y1 = bounds
+        xs = [x0, x1, x1, x0, x0]
+        ys = [y0, y0, y1, y1, y0]
+        self._ensure_rect_select_preview()
+        self.rect_select_preview.setData(xs, ys)
+
+    def _cells_fully_in_rect(self, x0, y0, x1, y1):
+        bounds = self._normalize_rect(x0, y0, x1, y1)
+        if bounds is None:
+            return []
+        x0, y0, x1, y1 = bounds
+        cellpix = self.cellpix[self.currentZ]
+        candidates = np.unique(cellpix[y0:y1, x0:x1])
+        candidates = np.trim_zeros(candidates)
+        filter_class_id = self.instance_class_filter()
+        self._ensure_instance_classes()
+        fully_covered = []
+        for idx in candidates:
+            ar, ac = np.nonzero(cellpix == idx)
+            if ar.min() < y0 or ar.max() >= y1 or ac.min() < x0 or ac.max() >= x1:
+                continue
+            row = int(idx) - 1
+            if filter_class_id is not None:
+                if row >= len(self.instance_classes) or int(
+                    self.instance_classes[row]
+                ) != filter_class_id:
+                    continue
+            fully_covered.append(int(idx))
+        return sorted(fully_covered)
+
+    def _sync_instance_table_selection(self, idx):
+        if not hasattr(self, "InstanceTable") or idx - 1 >= self.InstanceTable.rowCount():
+            return
+        self._sync_instance_table_selection_multi([idx])
+
+    def _sync_instance_table_selection_multi(self, indices):
+        if not hasattr(self, "InstanceTable"):
+            return
+        self._syncing_table_selection = True
+        self.InstanceTable.blockSignals(True)
+        self.InstanceTable.clearSelection()
+        for idx in indices:
+            row = idx - 1
+            if row < self.InstanceTable.rowCount():
+                self.InstanceTable.selectRow(row)
+        self.InstanceTable.blockSignals(False)
+        self._syncing_table_selection = False
+
+    def _apply_cell_selection(self, cells):
+        self.selected_cells = cells
+        self.selected = cells[0] if cells else 0
+        self.prev_selected = self.selected
+        self._sync_instance_table_selection_multi(cells)
+        self._update_selection_boxes()
+
+    def toggle_rect_select_mode(self, enabled):
+        self.rect_select_mode = enabled
+        self.p0.setMouseEnabled(x=not enabled, y=not enabled)
+        if not enabled:
+            self._rect_select_start = None
+            self._clear_rect_select_preview()
+
+    def eventFilter(self, obj, event):
+        if (
+            obj is self.win.scene()
+            and self.rect_select_mode
+            and self.loaded
+            and not self.removing_region
+            and not self.deleting_multiple
+        ):
+            event_type = event.type()
+            if (
+                event_type == QtCore.QEvent.Type.MouseButtonPress
+                and event.button() == QtCore.Qt.LeftButton
+            ):
+                self.begin_rect_select(self.p0.mapSceneToView(event.scenePos()))
+                return True
+            if (
+                event_type == QtCore.QEvent.Type.MouseMove
+                and event.buttons() & QtCore.Qt.LeftButton
+                and self._rect_select_start is not None
+            ):
+                self.update_rect_select(self.p0.mapSceneToView(event.scenePos()))
+                return True
+            if (
+                event_type == QtCore.QEvent.Type.MouseButtonRelease
+                and event.button() == QtCore.Qt.LeftButton
+                and self._rect_select_start is not None
+            ):
+                self.finish_rect_select(self.p0.mapSceneToView(event.scenePos()))
+                return True
+        return super().eventFilter(obj, event)
+
+    def begin_rect_select(self, pos):
+        self._rect_select_start = (int(pos.y()), int(pos.x()))
+
+    def update_rect_select(self, pos):
+        if self._rect_select_start is None:
+            return
+        y0, x0 = self._rect_select_start
+        y1, x1 = int(pos.y()), int(pos.x())
+        self._set_rect_preview(x0, y0, x1, y1)
+
+    def finish_rect_select(self, pos):
+        if self._rect_select_start is None:
+            return
+        y0, x0 = self._rect_select_start
+        y1, x1 = int(pos.y()), int(pos.x())
+        self._rect_select_start = None
+        self._clear_rect_select_preview()
+        cells = self._cells_fully_in_rect(x0, y0, x1, y1)
+        self._apply_cell_selection(cells)
 
     def select_cell(self, idx):
         self.prev_selected = self.selected
         self.selected = idx
+        self.selected_cells = [idx] if idx > 0 else []
         if self.selected > 0:
-            z = self.currentZ
-            self.layerz[self.cellpix[z] == idx] = np.array(
-                [255, 255, 255, self.opacity]
-            )
-            if (
-                hasattr(self, "InstanceTable")
-                and idx - 1 < self.InstanceTable.rowCount()
-            ):
-                self.InstanceTable.selectRow(idx - 1)
-            self.update_layer()
+            self._sync_instance_table_selection(idx)
+            self._update_selection_boxes()
+        else:
+            self._clear_selection_boxes()
+
+    def select_cell_from_table(self):
+        if self._refreshing_instance_table or self._syncing_table_selection:
+            return
+        selected_rows = self.InstanceTable.selectionModel().selectedRows()
+        if not selected_rows:
+            if self.selected > 0 or self.selected_cells:
+                self.selected = 0
+                self.selected_cells = []
+                self._clear_selection_boxes()
+            return
+        cells = sorted({row.row() + 1 for row in selected_rows})
+        if cells == self.selected_cells:
+            self._update_selection_boxes()
+            return
+        self.prev_selected = self.selected
+        self.selected_cells = cells
+        self.selected = cells[0] if cells else 0
+        self._update_selection_boxes()
 
     def select_cell_multi(self, idx):
         if idx > 0:
@@ -1190,31 +1508,22 @@ class MainW(QMainWindow):
             self.update_layer()
 
     def unselect_cell(self):
-        if self.selected > 0:
-            idx = self.selected
-            if idx < (self.ncells.get() + 1):
-                z = self.currentZ
-                self.layerz[self.cellpix[z] == idx] = np.append(
-                    self.cellcolors[idx], self.opacity
-                )
-                if self.outlinesOn:
-                    self.layerz[self.outpix[z] == idx] = np.array(self.outcolor).astype(
-                        np.uint8
-                    )
-                    # [0,0,0,self.opacity])
-                self.update_layer()
         self.selected = 0
+        self.selected_cells = []
+        self._clear_selection_boxes()
+        if hasattr(self, "InstanceTable"):
+            self._syncing_table_selection = True
+            self.InstanceTable.blockSignals(True)
+            self.InstanceTable.clearSelection()
+            self.InstanceTable.blockSignals(False)
+            self._syncing_table_selection = False
 
     def unselect_cell_multi(self, idx):
         z = self.currentZ
         self.layerz[self.cellpix[z] == idx] = np.append(
             self.cellcolors[idx], self.opacity
         )
-        if self.outlinesOn:
-            self.layerz[self.outpix[z] == idx] = np.array(self.outcolor).astype(
-                np.uint8
-            )
-            # [0,0,0,self.opacity])
+        self.layerz[self.outpix[z] == idx] = np.array(self.outcolor).astype(np.uint8)
         self.update_layer()
 
     def remove_cell(self, idx):
@@ -1237,10 +1546,15 @@ class MainW(QMainWindow):
     def remove_single_cell(self, idx):
         # remove from manual array
         self.selected = 0
+        self.selected_cells = []
         removed_class_id = 0
+        removed_visible = True
         self._ensure_instance_classes()
+        self._ensure_instance_visible()
         if idx - 1 < len(self.instance_classes):
             removed_class_id = int(self.instance_classes[idx - 1])
+        if idx - 1 < len(self.instance_visible):
+            removed_visible = bool(self.instance_visible[idx - 1])
         if self.NZ > 1:
             zextent = ((self.cellpix == idx).sum(axis=(1, 2)) > 0).nonzero()[0]
         else:
@@ -1266,6 +1580,7 @@ class MainW(QMainWindow):
                 np.nonzero(cp),
                 np.nonzero(op),
                 removed_class_id,
+                removed_visible,
             ]
             self.redo.setEnabled(True)
             ar, ac = self.removed_cell[2]
@@ -1278,6 +1593,8 @@ class MainW(QMainWindow):
         self.cellcolors = np.delete(self.cellcolors, [idx], axis=0)
         if idx - 1 < len(self.instance_classes):
             self.instance_classes = np.delete(self.instance_classes, idx - 1)
+        if idx - 1 < len(self.instance_visible):
+            self.instance_visible = np.delete(self.instance_visible, idx - 1)
         del self.zdraw[idx - 1]
         print("GUI_INFO: removed cell %d" % (idx - 1))
 
@@ -1377,6 +1694,8 @@ class MainW(QMainWindow):
             self.ismanual = np.append(self.ismanual, self.removed_cell[0])
             class_id = self.removed_cell[4] if len(self.removed_cell) > 4 else 0
             self.instance_classes = np.append(self.instance_classes, class_id)
+            visible = self.removed_cell[5] if len(self.removed_cell) > 5 else True
+            self.instance_visible = np.append(self.instance_visible, visible)
             self.ncells += 1
             self.zdraw.append([])
             print(">>> added back removed cell")
@@ -1397,19 +1716,13 @@ class MainW(QMainWindow):
             if self.selected > 0:
                 ccol[self.selected] = np.array([255, 255, 255])
             col2mask = ccol[cellpix]
-            if self.masksOn:
-                col2mask = np.concatenate(
-                    (col2mask, self.opacity * (cellpix[:, np.newaxis] > 0)), axis=-1
-                )
-            else:
-                col2mask = np.concatenate(
-                    (col2mask, 0 * (cellpix[:, np.newaxis] > 0)), axis=-1
-                )
+            col2mask = np.concatenate(
+                (col2mask, self.opacity * (cellpix[:, np.newaxis] > 0)), axis=-1
+            )
             self.layerz[stroke[:, 1], stroke[:, 2], :] = col2mask
-            if self.outlinesOn:
-                self.layerz[stroke[outpix, 1], stroke[outpix, 2]] = np.array(
-                    self.outcolor
-                )
+            self.layerz[stroke[outpix, 1], stroke[outpix, 2]] = np.array(
+                self.outcolor
+            )
             if delete_points:
                 del self.current_point_set[stroke_ind]
             self.update_layer()
@@ -1515,8 +1828,8 @@ class MainW(QMainWindow):
         self.show()
 
     def update_layer(self):
-        if self.masksOn or self.outlinesOn:
-            self.layer.setImage(self.layerz, autoLevels=False)
+        self.layer.setImage(self.layerz, autoLevels=False)
+        self._update_selection_boxes()
         self.win.show()
         self.show()
 
@@ -1537,6 +1850,7 @@ class MainW(QMainWindow):
                     self.instance_classes = np.append(
                         self.instance_classes, self.default_class_id()
                     )
+                    self.instance_visible = np.append(self.instance_visible, True)
                     self.ncells += 1
                     self.draw_layer()
                     if self.NZ == 1:
@@ -1661,10 +1975,8 @@ class MainW(QMainWindow):
 
         if z == self.currentZ:
             self.layerz[ar, ac, :3] = color
-            if self.masksOn:
-                self.layerz[ar, ac, -1] = self.opacity
-            if self.outlinesOn:
-                self.layerz[vr, vc] = np.array(self.outcolor)
+            self.layerz[ar, ac, -1] = self.opacity
+            self.layerz[vr, vc] = np.array(self.outcolor)
 
     def compute_scale(self):
         # get diameter from gui
@@ -1702,41 +2014,32 @@ class MainW(QMainWindow):
         else:
             self.Ly, self.Lx = self.Ly0, self.Lx0
 
-        if self.masksOn or self.outlinesOn:
-            if self.restore and "upsample" in self.restore:
-                if self.resize:
-                    self.cellpix = self.cellpix_resize.copy()
-                    self.outpix = self.outpix_resize.copy()
-                else:
-                    self.cellpix = self.cellpix_orig.copy()
-                    self.outpix = self.outpix_orig.copy()
+        if self.restore and "upsample" in self.restore:
+            if self.resize:
+                self.cellpix = self.cellpix_resize.copy()
+                self.outpix = self.outpix_resize.copy()
+            else:
+                self.cellpix = self.cellpix_orig.copy()
+                self.outpix = self.outpix_orig.copy()
 
         self.layerz = np.zeros((self.Ly, self.Lx, 4), np.uint8)
         cellpix = self.cellpix[self.currentZ]
         visible_pixels = self.visible_cell_pixels(cellpix)
-        if self.masksOn:
-            self.layerz[..., :3] = self.cellcolors[cellpix, :]
-            self.layerz[..., 3] = self.opacity * visible_pixels.astype(np.uint8)
-            if self.selected > 0 and visible_pixels[cellpix == self.selected].any():
-                self.layerz[self.cellpix[self.currentZ] == self.selected] = np.array(
-                    [255, 255, 255, self.opacity]
+        self.layerz[..., :3] = self.cellcolors[cellpix, :]
+        self.layerz[..., 3] = self.opacity * visible_pixels.astype(np.uint8)
+        cZ = self.currentZ
+        stroke_z = np.array([s[0][0] for s in self.strokes])
+        inZ = np.nonzero(stroke_z == cZ)[0]
+        if len(inZ) > 0:
+            for i in inZ:
+                stroke = np.array(self.strokes[i])
+                self.layerz[stroke[:, 1], stroke[:, 2]] = np.array(
+                    [255, 0, 255, 100]
                 )
-            cZ = self.currentZ
-            stroke_z = np.array([s[0][0] for s in self.strokes])
-            inZ = np.nonzero(stroke_z == cZ)[0]
-            if len(inZ) > 0:
-                for i in inZ:
-                    stroke = np.array(self.strokes[i])
-                    self.layerz[stroke[:, 1], stroke[:, 2]] = np.array(
-                        [255, 0, 255, 100]
-                    )
-        else:
-            self.layerz[..., 3] = 0
 
-        if self.outlinesOn:
-            self.layerz[(self.outpix[self.currentZ] > 0) & visible_pixels] = np.array(
-                self.outcolor
-            ).astype(np.uint8)
+        self.layerz[(self.outpix[self.currentZ] > 0) & visible_pixels] = np.array(
+            self.outcolor
+        ).astype(np.uint8)
 
     def set_normalize_params(self, normalize_params):
         from cellpose.models import normalize_default
@@ -2058,9 +2361,6 @@ class MainW(QMainWindow):
                 flow_threshold=segmentation_params["flow_threshold"],
             )
 
-            self.masksOn = True
-            if not self.OCheckBox.isChecked():
-                self.MCheckBox.setChecked(True)
             if maski.ndim < 3:
                 maski = maski[np.newaxis, ...]
             self.logger.info("%d cells found" % (len(np.unique(maski)[1:])))
@@ -2209,8 +2509,6 @@ class MainW(QMainWindow):
             z = 0
 
             io._masks_to_gui(self, masks, outlines=None)
-            self.masksOn = True
-            self.MCheckBox.setChecked(True)
             self.progress.setValue(100)
             if not do_3D and not stitch_threshold > 0:
                 self.recompute_masks = True

@@ -15,6 +15,7 @@ from PySide6 import QtCore
 
 from .model import (
     InstanceClasses,
+    InstanceVisibility,
     PreprocessingParameters,
     SegmentationParameters,
     SeriesState,
@@ -32,6 +33,7 @@ class MainViewModel(QtCore.QObject):
         self._model_save_folder = model_save_folder
         self.series_state = SeriesState.empty()
         self.instances = InstanceClasses()
+        self.instance_visibility = InstanceVisibility()
         self.training_params: dict[str, Any] = {}
         self.reset_training_parameters()
 
@@ -122,13 +124,33 @@ class MainViewModel(QtCore.QObject):
         self.instanceClassesChanged.emit(result)
         return result
 
+    def ensure_instance_visible(
+        self, ncells: int, current_values: np.ndarray | None = None
+    ) -> np.ndarray:
+        return self.instance_visibility.ensure_size(
+            ncells, current_values=current_values
+        )
+
+    def set_instance_visible(
+        self, ncells: int, values: np.ndarray | list[bool] | None = None
+    ) -> np.ndarray:
+        return self.instance_visibility.replace(ncells, values)
+
+    def set_instance_visible_row(self, row: int, visible: bool) -> np.ndarray:
+        return self.instance_visibility.set_visible(row, visible)
+
     def instance_class_filter(self, text: str) -> int | None:
         return InstanceClasses.parse_filter(text)
 
     def visible_cell_pixels(
-        self, cellpix: np.ndarray, filter_class_id: int | None
+        self,
+        cellpix: np.ndarray,
+        filter_class_id: int | None,
+        visibility: np.ndarray | None = None,
     ) -> np.ndarray:
-        return self.instances.visible_cell_pixels(cellpix, filter_class_id)
+        return self.instances.visible_cell_pixels(
+            cellpix, filter_class_id, visibility
+        )
 
 
 class ObservableVariable(QtCore.QObject):

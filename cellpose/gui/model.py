@@ -219,16 +219,64 @@ class InstanceClasses:
         return class_id if class_id >= 0 else None
 
     def visible_cell_pixels(
-        self, cellpix: np.ndarray, filter_class_id: int | None
+        self,
+        cellpix: np.ndarray,
+        filter_class_id: int | None,
+        visibility: np.ndarray | None = None,
     ) -> np.ndarray:
-        if filter_class_id is None:
-            return cellpix > 0
-
         max_label = int(cellpix.max())
+        if max_label == 0:
+            return np.zeros(cellpix.shape, dtype=bool)
+
         visible_labels = np.zeros(max_label + 1, dtype=bool)
         nlabels = min(max_label, len(self.values))
         if nlabels > 0:
-            visible_labels[1 : nlabels + 1] = (
-                self.values[:nlabels] == filter_class_id
+            if filter_class_id is None:
+                visible_labels[1 : nlabels + 1] = True
+            else:
+                visible_labels[1 : nlabels + 1] = (
+                    self.values[:nlabels] == filter_class_id
+                )
+        if visibility is not None and len(visibility) > 0:
+            nvisible = min(max_label, len(visibility))
+            visible_labels[1 : nvisible + 1] &= np.asarray(
+                visibility[:nvisible], dtype=bool
             )
         return visible_labels[cellpix]
+
+
+@dataclass
+class InstanceVisibility:
+    values: np.ndarray = field(
+        default_factory=lambda: np.zeros(0, dtype=bool)
+    )
+
+    def ensure_size(
+        self, ncells: int, current_values: np.ndarray | None = None
+    ) -> np.ndarray:
+        values = self.values if current_values is None else current_values
+        values = np.asarray(values, dtype=bool).ravel()
+        if len(values) < ncells:
+            pad = np.ones(ncells - len(values), dtype=bool)
+            values = np.concatenate((values, pad))
+        elif len(values) > ncells:
+            values = values[:ncells]
+        self.values = values
+        return self.values
+
+    def replace(
+        self, ncells: int, values: np.ndarray | list[bool] | None = None
+    ) -> np.ndarray:
+        result = np.ones(ncells, dtype=bool)
+        if values is not None:
+            loaded = np.asarray(values, dtype=bool).ravel()
+            n = min(ncells, len(loaded))
+            result[:n] = loaded[:n]
+        self.values = result
+        return self.values
+
+    def set_visible(self, row: int, visible: bool) -> np.ndarray:
+        if row >= len(self.values):
+            return self.values
+        self.values[row] = bool(visible)
+        return self.values

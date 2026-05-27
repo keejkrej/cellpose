@@ -8,10 +8,55 @@ import numpy as np
 
 os.environ.setdefault("PYQTGRAPH_QT_LIB", "PySide6")
 from PySide6 import QtCore
-from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QSlider, QVBoxLayout, QWidget
+from PySide6.QtWidgets import (
+    QCheckBox,
+    QFrame,
+    QHBoxLayout,
+    QHeaderView,
+    QLabel,
+    QSlider,
+    QVBoxLayout,
+    QWidget,
+)
 import pyqtgraph as pg
 
 Horizontal = QtCore.Qt.Orientation.Horizontal
+
+
+class CheckBoxHeader(QHeaderView):
+    checkboxClicked = QtCore.Signal(int)
+
+    def __init__(self, orientation, parent=None):
+        super().__init__(orientation, parent)
+        self._checkbox = QCheckBox(self)
+        self._checkbox.setTristate(True)
+        self._checkbox.setToolTip("Show or hide all cell masks and outlines")
+        self._checkbox.stateChanged.connect(self.checkboxClicked.emit)
+        self.sectionResized.connect(self._update_checkbox_geometry)
+        self.geometriesChanged.connect(self._update_checkbox_geometry)
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self._update_checkbox_geometry()
+
+    def _update_checkbox_geometry(self, *_args):
+        if self.count() == 0:
+            return
+        x = self.sectionPosition(0)
+        width = self.sectionSize(0)
+        height = self.height()
+        size = min(20, max(width - 4, 0), max(height - 4, 0))
+        self._checkbox.setGeometry(
+            int(x + (width - size) / 2),
+            int((height - size) / 2),
+            size,
+            size,
+        )
+
+    def set_check_state(self, state):
+        self._checkbox.blockSignals(True)
+        self._checkbox.setCheckState(state)
+        self._checkbox.blockSignals(False)
 
 
 class Slider(QWidget):
@@ -171,14 +216,15 @@ class ImageDraw(pg.ImageItem):
         self.parent.in_stroke = False
 
     def mouseClickEvent(self, ev):
-        if (
-            self.parent.masksOn or self.parent.outlinesOn
-        ) and not self.parent.removing_region:
+        if self.parent.rect_select_mode:
+            ev.accept()
+            return
+        if self.parent.loaded and not self.parent.removing_region:
             if (
-                self.parent.loaded
-                and ev.modifiers() & QtCore.Qt.ShiftModifier
+                ev.modifiers() & QtCore.Qt.ShiftModifier
                 and not ev.double()
                 and not self.parent.deleting_multiple
+                and not self.parent.rect_select_mode
             ):
                 if not self.parent.in_stroke:
                     ev.accept()
@@ -201,8 +247,8 @@ class ImageDraw(pg.ImageItem):
                             elif ev.modifiers() & QtCore.Qt.AltModifier:
                                 self.parent.merge_cells(idx)
                             elif (
-                                self.parent.masksOn
-                                and not self.parent.deleting_multiple
+                                not self.parent.deleting_multiple
+                                and not self.parent.rect_select_mode
                             ):
                                 self.parent.unselect_cell()
                                 self.parent.select_cell(idx)
@@ -214,7 +260,7 @@ class ImageDraw(pg.ImageItem):
                                     self.parent.select_cell_multi(idx)
                                     self.parent.removing_cells_list.append(idx)
 
-                        elif self.parent.masksOn and not self.parent.deleting_multiple:
+                        elif not self.parent.deleting_multiple:
                             self.parent.unselect_cell()
 
     def mouseDragEvent(self, ev):
@@ -266,12 +312,12 @@ class ImageDraw(pg.ImageItem):
                 list(self.parent.current_stroke[ioutline])
             )
             self.parent.current_stroke = []
-            if self.parent.autosave:
+            if self.parent.autosave_enabled():
                 self.parent.add_set()
         if (
             len(self.parent.current_point_set)
             and len(self.parent.current_point_set[0]) > 0
-            and self.parent.autosave
+            and self.parent.autosave_enabled()
         ):
             self.parent.add_set()
         self.parent.in_stroke = False

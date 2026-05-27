@@ -502,6 +502,8 @@ def _load_seg(parent, filename=None, image=None, image_file=None, load_3D=False)
 
     if hasattr(parent, "set_instance_classes"):
         parent.set_instance_classes(dat.get("instance_classes"))
+    if hasattr(parent, "set_instance_visible"):
+        parent.set_instance_visible()
 
     if "flows" in dat:
         parent.flows = dat["flows"]
@@ -646,6 +648,9 @@ def _masks_to_gui(parent, masks, outlines=None, colors=None):
     parent.zdraw = list(-1 * np.ones(parent.ncells.get(), np.int16))
     if hasattr(parent, "set_instance_classes"):
         parent.set_instance_classes()
+
+    if hasattr(parent, "set_instance_visible"):
+        parent.set_instance_visible()
 
     if hasattr(parent, "stack_filtered"):
         parent.ViewDropDown.setCurrentIndex(parent.ViewDropDown.count() - 1)
