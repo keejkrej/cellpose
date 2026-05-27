@@ -13,6 +13,9 @@ struct ImageCanvasView: NSViewRepresentable {
                     Task { await viewModel.completeStroke(at: Int(point.x), y: Int(point.y)) }
                 } else {
                     viewModel.beginStroke(at: Int(point.x), y: Int(point.y))
+                    view.liveStroke = viewModel.currentStrokePoints
+                    view.inStroke = viewModel.inStroke
+                    view.needsDisplay = true
                 }
             } else {
                 viewModel.removeCell(at: Int(point.x), y: Int(point.y), modifierFlags: view.lastModifierFlags)
@@ -21,6 +24,8 @@ struct ImageCanvasView: NSViewRepresentable {
         view.onHover = { point in
             if viewModel.brushMode, viewModel.inStroke {
                 viewModel.continueStroke(at: Int(point.x), y: Int(point.y))
+                view.liveStroke = viewModel.currentStrokePoints
+                view.needsDisplay = true
             }
         }
         view.onScroll = { delta in
@@ -49,6 +54,8 @@ struct ImageCanvasView: NSViewRepresentable {
         nsView.showMasks = viewModel.showMasks
         nsView.showOutlines = viewModel.showOutlines
         nsView.selectedCell = viewModel.selectedCell
+        nsView.liveStroke = viewModel.currentStrokePoints
+        nsView.inStroke = viewModel.inStroke
         nsView.zoom = zoom
         nsView.needsDisplay = true
     }
@@ -60,6 +67,8 @@ final class ImageCanvasNSView: NSView {
     var showMasks = true
     var showOutlines = false
     var selectedCell: Int32 = 0
+    var liveStroke: [[Double]] = []
+    var inStroke = false
     var zoom: CGFloat = 1
     var onClick: ((NSPoint) -> Void)?
     var onHover: ((NSPoint) -> Void)?
@@ -105,6 +114,81 @@ final class ImageCanvasNSView: NSView {
         if showMasks || showOutlines, let masks {
             drawMaskOverlay(masks: masks, in: rect, context: context)
         }
+
+        if inStroke, !liveStroke.isEmpty {
+            drawLiveStroke(in: rect, context: context)
+        }
+    }
+
+    private func drawLiveStroke(in rect: NSRect, context: CGContext) {
+        guard let image else { return }
+
+        let width = image.width
+        let height = image.height
+        guard width > 0, height > 0 else { return }
+
+        let pixelWidth = rect.width / CGFloat(width)
+        let pixelHeight = rect.height / CGFloat(height)
+        context.setFillColor(red: 1, green: 0, blue: 1, alpha: 100.0 / 255.0)
+
+        for (x, y) in interpolatedStrokePoints(liveStroke) {
+            let cellRect = NSRect(
+                x: rect.minX + CGFloat(x) * pixelWidth,
+                y: rect.minY + CGFloat(height - y - 1) * pixelHeight,
+                width: max(pixelWidth, 1),
+                height: max(pixelHeight, 1)
+            )
+            context.fill(cellRect)
+        }
+    }
+
+    private func interpolatedStrokePoints(_ stroke: [[Double]]) -> [(Int, Int)] {
+        guard !stroke.isEmpty else { return [] }
+
+        var points: [(Int, Int)] = []
+        for index in stroke.indices {
+            let y = Int(stroke[index][1])
+            let x = Int(stroke[index][2])
+            if index == 0 {
+                points.append((x, y))
+                continue
+            }
+
+            let prevY = Int(stroke[index - 1][1])
+            let prevX = Int(stroke[index - 1][2])
+            points.append(contentsOf: linePoints(x0: prevX, y0: prevY, x1: x, y1: y))
+        }
+        return points
+    }
+
+    private func linePoints(x0: Int, y0: Int, x1: Int, y1: Int) -> [(Int, Int)] {
+        var points: [(Int, Int)] = []
+        var x0 = x0
+        var y0 = y0
+        let dx = abs(x1 - x0)
+        let dy = -abs(y1 - y0)
+        let sx = x0 < x1 ? 1 : -1
+        let sy = y0 < y1 ? 1 : -1
+        var err = dx + dy
+
+        while true {
+            points.append((x0, y0))
+            if x0 == x1, y0 == y1 {
+                break
+            }
+
+            let e2 = 2 * err
+            if e2 >= dy {
+                err += dy
+                x0 += sx
+            }
+            if e2 <= dx {
+                err += dx
+                y0 += sy
+            }
+        }
+
+        return points
     }
 
     private func drawMaskOverlay(masks: MaskData, in rect: NSRect, context: CGContext) {

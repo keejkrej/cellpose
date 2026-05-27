@@ -35,6 +35,7 @@ final class MainViewModel {
     var defaultClassID: Int32 = 0
     var brushMode = false
     var inStroke = false
+    var strokeRevision = 0
     var viewMode: ViewMode = .image
 
     var models: [String] = ["CPSAM"]
@@ -47,6 +48,7 @@ final class MainViewModel {
 
     var canSaveMasks: Bool { imageLoaded && ncells > 0 }
     var canRunSegmentation: Bool { imageLoaded && !isBusy }
+    var currentStrokePoints: [[Double]] { currentStroke }
 
     private let ml: MlInferenceEngine
     private let sessionStore = CellposeSessionStore()
@@ -109,11 +111,25 @@ final class MainViewModel {
         updateSaturationFromImage()
     }
 
-    func applyMaskUpdate(_ updated: MaskData) {
-        session.masks = updated
-        masks = updated
-        ncells = updated.labels.isEmpty ? 0 : Int(updated.labels.max() ?? 0)
-        instanceClasses.replace(ncells: ncells)
+    func applyMaskUpdate(_ updated: MaskData, appendedClassID: Int32? = nil) {
+        let previousNcells = ncells
+        let newNcells = updated.labels.isEmpty ? 0 : Int(updated.labels.max() ?? 0)
+        instanceClasses.replace(ncells: newNcells, loaded: instanceClasses.values)
+        if let appendedClassID, newNcells > previousNcells {
+            instanceClasses.setClass(row: newNcells - 1, classID: appendedClassID)
+        }
+        let colored = MaskEditService.withClassColors(masks: updated, classIDs: instanceClasses.values)
+        session.masks = colored
+        masks = colored
+        ncells = newNcells
+    }
+
+    func setInstanceClass(row: Int, classID: Int32) {
+        instanceClasses.setClass(row: row, classID: classID)
+        guard let currentMasks = session.masks else { return }
+        let colored = MaskEditService.withClassColors(masks: currentMasks, classIDs: instanceClasses.values)
+        session.masks = colored
+        masks = colored
     }
 
     func applyInferenceResult(_ result: InferResult) {
@@ -509,6 +525,7 @@ final class MainViewModel {
         currentStroke = [[Double(z), Double(y), Double(x), 0]]
         pendingStrokes = []
         inStroke = true
+        notifyStrokeChanged()
     }
 
     func continueStroke(at x: Int, y: Int, z: Int = 0) {
@@ -518,12 +535,15 @@ final class MainViewModel {
             return
         }
         currentStroke.append([Double(z), Double(y), Double(x), 0])
+        notifyStrokeChanged()
     }
 
     func cancelStroke() {
         currentStroke = []
         pendingStrokes = []
+        guard inStroke else { return }
         inStroke = false
+        notifyStrokeChanged()
     }
 
     func commitStroke() {
@@ -537,7 +557,12 @@ final class MainViewModel {
         continueStroke(at: x, y: y, z: z)
         commitStroke()
         inStroke = false
+        notifyStrokeChanged()
         await finishDrawing()
+    }
+
+    private func notifyStrokeChanged() {
+        strokeRevision += 1
     }
 
     func finishDrawing() async {
@@ -554,7 +579,7 @@ final class MainViewModel {
             ) else {
                 return
             }
-            self.applyMaskUpdate(updated)
+            self.applyMaskUpdate(updated, appendedClassID: self.defaultClassID)
             self.saveSessionIfNeeded()
         }
     }

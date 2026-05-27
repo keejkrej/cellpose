@@ -279,6 +279,10 @@ public sealed class MainViewModel : ObservableObject
 
     public bool InStroke => _inStroke;
 
+    public IReadOnlyList<double[]> CurrentStroke => _currentStroke;
+
+    public int StrokeRevision { get; private set; }
+
     public ViewMode ViewMode
     {
         get => _viewMode;
@@ -390,31 +394,56 @@ public sealed class MainViewModel : ObservableObject
 
         Filename = loaded.ImagePath;
         Image = loaded.Image;
-        Masks = loaded.Masks;
-        Ncells = loaded.Masks.Labels.Length == 0 ? 0 : loaded.Masks.Labels.Max();
         RecomputeMasks = loaded.RecomputeMasks;
-        InstanceClasses.Replace(Ncells);
-        InstanceVisibility.Replace(Ncells);
+        SegmentationParams.CopyFrom(loaded.Segmentation);
         SelectedCell = 0;
         Progress = 1;
         ImageLoaded = true;
         UpdateSaturationFromImage();
-        Notify(nameof(CanvasRevision));
+        ApplyMaskUpdate(loaded.Masks);
     }
 
-    public void ApplyMaskUpdate(MaskData masks)
+    public void ApplyMaskUpdate(MaskData masks, int? appendedClassId = null)
     {
         if (!_dispatcher.HasThreadAccess)
         {
-            RunOnUi(() => ApplyMaskUpdate(masks));
+            RunOnUi(() => ApplyMaskUpdate(masks, appendedClassId));
             return;
         }
 
+        var previousNcells = _ncells;
+        var ncells = masks.Labels.Length == 0 ? 0 : masks.Labels.Max();
+        InstanceClasses.Replace(ncells, InstanceClasses.Values);
+        InstanceVisibility.Replace(ncells, InstanceVisibility.Values);
+
+        if (appendedClassId.HasValue && ncells > previousNcells)
+            InstanceClasses.SetClass(ncells - 1, appendedClassId.Value);
+
+        masks = MaskEditService.WithClassColors(masks, InstanceClasses.Values);
         _session.Masks = masks;
         Masks = masks;
-        Ncells = masks.Labels.Length == 0 ? 0 : masks.Labels.Max();
-        InstanceClasses.Replace(Ncells);
-        InstanceVisibility.Replace(Ncells);
+        Ncells = ncells;
+        InstanceRowsRevision++;
+        Notify(nameof(InstanceRowsRevision));
+        Notify(nameof(FilteredCellCount));
+        Notify(nameof(AllInstancesVisible));
+        NotifyCanvasChanged();
+    }
+
+    public void SetInstanceClass(int row, int classId)
+    {
+        if (row < 0 || row >= InstanceClasses.Values.Count || classId < 0)
+            return;
+
+        InstanceClasses.SetClass(row, classId);
+        if (_session.Masks == null)
+            return;
+
+        var updated = MaskEditService.WithClassColors(_session.Masks, InstanceClasses.Values);
+        _session.Masks = updated;
+        Masks = updated;
+        InstanceRowsRevision++;
+        Notify(nameof(InstanceRowsRevision));
         NotifyCanvasChanged();
     }
 
@@ -903,6 +932,7 @@ public sealed class MainViewModel : ObservableObject
         _currentStroke.Add([z, y, x, 0]);
         _inStroke = true;
         Notify(nameof(InStroke));
+        NotifyStrokeChanged();
     }
 
     public void ContinueStroke(int x, int y, int z = 0)
@@ -915,6 +945,7 @@ public sealed class MainViewModel : ObservableObject
             return;
 
         _currentStroke.Add([z, y, x, 0]);
+        NotifyStrokeChanged();
     }
 
     public void CancelStroke()
@@ -926,6 +957,7 @@ public sealed class MainViewModel : ObservableObject
 
         _inStroke = false;
         Notify(nameof(InStroke));
+        NotifyStrokeChanged();
     }
 
     public void CommitStroke()
@@ -946,7 +978,14 @@ public sealed class MainViewModel : ObservableObject
         CommitStroke();
         _inStroke = false;
         Notify(nameof(InStroke));
+        NotifyStrokeChanged();
         await FinishDrawingAsync();
+    }
+
+    private void NotifyStrokeChanged()
+    {
+        StrokeRevision++;
+        Notify(nameof(StrokeRevision));
     }
 
     public Task FinishDrawingAsync()
@@ -969,7 +1008,7 @@ public sealed class MainViewModel : ObservableObject
             if (updated == null)
                 return;
 
-            ApplyMaskUpdate(updated);
+            ApplyMaskUpdate(updated, appendedClassId: _defaultClassId);
             SaveSessionIfNeeded();
         });
     }

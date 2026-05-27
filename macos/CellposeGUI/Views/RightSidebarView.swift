@@ -103,7 +103,7 @@ struct InstanceTableView: View {
                                         : 0
                                 },
                                 set: { newValue in
-                                    viewModel.instanceClasses.setClass(row: row, classID: newValue)
+                                    viewModel.setInstanceClass(row: row, classID: newValue)
                                 }
                             ),
                             format: .number

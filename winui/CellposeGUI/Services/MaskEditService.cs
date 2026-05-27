@@ -32,11 +32,42 @@ public static class MaskEditService
 
     public static byte[][] DefaultColors(int ncells)
     {
-        var random = new Random(42);
         var colors = new byte[Math.Max(ncells, 0)][];
         for (var i = 0; i < ncells; i++)
-            colors[i] = [(byte)random.Next(50, 256), (byte)random.Next(50, 256), (byte)random.Next(50, 256)];
+            colors[i] = ColorForClass(i);
         return colors;
+    }
+
+    public static byte[] ColorForClass(int classId)
+    {
+        var random = new Random(42 + classId * 7919);
+        return [(byte)random.Next(50, 256), (byte)random.Next(50, 256), (byte)random.Next(50, 256)];
+    }
+
+    public static MaskData WithClassColors(MaskData masks, IReadOnlyList<int> classIds)
+    {
+        if (masks.Labels.Length == 0)
+            return masks;
+
+        var ncells = masks.Labels.Max();
+        if (ncells <= 0)
+            return masks;
+
+        var colors = new byte[ncells][];
+        for (var i = 0; i < ncells; i++)
+        {
+            var classId = i < classIds.Count ? classIds[i] : 0;
+            colors[i] = ColorForClass(classId);
+        }
+
+        return new MaskData
+        {
+            Width = masks.Width,
+            Height = masks.Height,
+            Labels = masks.Labels,
+            Colors = colors,
+            OutlineLabels = masks.OutlineLabels,
+        };
     }
 
     public static int[] ComputeOutlineLabels(int[] labels, int width, int height)
@@ -131,7 +162,7 @@ public static class MaskEditService
             labels = new int[width * height];
 
         var colors = masks?.Colors?.ToList() ?? [];
-        var fillColor = color ?? [100, 200, 50];
+        var fillColor = color ?? ColorForClass(classId);
         var filledRows = new List<int>();
         var filledCols = new List<int>();
         var outlineRows = new List<int>();

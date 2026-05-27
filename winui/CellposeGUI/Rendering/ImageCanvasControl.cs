@@ -29,6 +29,10 @@ public sealed class ImageCanvasControl : Grid
     private bool _isPanning;
     private Point _panStart;
     private Point _panOffsetStart;
+    private byte[]? _baseLayerPixels;
+    private int _baseLayerRevision = -1;
+    private int _baseLayerWidth;
+    private int _baseLayerHeight;
 
     public ImageCanvasControl()
     {
@@ -111,8 +115,13 @@ public sealed class ImageCanvasControl : Grid
             nameof(MainViewModel.ViewMode) or
             nameof(MainViewModel.CanvasRevision))
         {
+            _baseLayerRevision = -1;
             Redraw();
+            return;
         }
+
+        if (e.PropertyName is nameof(MainViewModel.StrokeRevision) or nameof(MainViewModel.InStroke))
+            Redraw();
     }
 
     private void Redraw()
@@ -139,6 +148,8 @@ public sealed class ImageCanvasControl : Grid
         if (image == null)
         {
             _imageControl.Source = null;
+            _baseLayerPixels = null;
+            _baseLayerRevision = -1;
             return;
         }
 
@@ -146,32 +157,52 @@ public sealed class ImageCanvasControl : Grid
         if (pixelCount <= 0)
             return;
 
-        var (grayLow, grayHigh) = GetDisplayLevels();
-        _bitmap = new WriteableBitmap(image.Width, image.Height);
-        var bgra = new byte[pixelCount * 4];
-        for (var i = 0; i < pixelCount; i++)
+        if (_baseLayerRevision != _viewModel!.CanvasRevision ||
+            _baseLayerPixels == null ||
+            _baseLayerWidth != image.Width ||
+            _baseLayerHeight != image.Height)
         {
-            var gray = ImageData.MapGrayLevel(image.GetGrayValue(i), grayLow, grayHigh);
-            var bgraOffset = i * 4;
-            bgra[bgraOffset] = gray;
-            bgra[bgraOffset + 1] = gray;
-            bgra[bgraOffset + 2] = gray;
-            bgra[bgraOffset + 3] = 255;
+            _baseLayerPixels = BuildBaseLayerPixels(image, _viewModel);
+            _baseLayerRevision = _viewModel.CanvasRevision;
+            _baseLayerWidth = image.Width;
+            _baseLayerHeight = image.Height;
         }
 
+        var pixels = (byte[])_baseLayerPixels.Clone();
+        if (_viewModel.InStroke && _viewModel.CurrentStroke.Count > 0)
+            DrawLiveStrokeOverlay(pixels, image.Width, image.Height, _viewModel.CurrentStroke);
+
+        _bitmap = new WriteableBitmap(image.Width, image.Height);
         using (var stream = _bitmap.PixelBuffer.AsStream())
         {
-            stream.Write(bgra, 0, bgra.Length);
+            stream.Write(pixels, 0, pixels.Length);
             stream.Flush();
         }
 
         _bitmap.Invalidate();
-
-        if (_viewModel?.ShowMasks == true || _viewModel?.ShowOutlines == true)
-            DrawMaskOverlay(_bitmap, _viewModel);
-
         _imageControl.Source = _bitmap;
         UpdateViewport();
+    }
+
+    private byte[] BuildBaseLayerPixels(ImageData image, MainViewModel viewModel)
+    {
+        var pixelCount = image.Width * image.Height;
+        var (grayLow, grayHigh) = GetDisplayLevels();
+        var pixels = new byte[pixelCount * 4];
+        for (var i = 0; i < pixelCount; i++)
+        {
+            var gray = ImageData.MapGrayLevel(image.GetGrayValue(i), grayLow, grayHigh);
+            var bgraOffset = i * 4;
+            pixels[bgraOffset] = gray;
+            pixels[bgraOffset + 1] = gray;
+            pixels[bgraOffset + 2] = gray;
+            pixels[bgraOffset + 3] = 255;
+        }
+
+        if (viewModel.ShowMasks || viewModel.ShowOutlines)
+            DrawMaskOverlay(pixels, viewModel);
+
+        return pixels;
     }
 
     private void UpdateClip()
@@ -226,16 +257,11 @@ public sealed class ImageCanvasControl : Grid
         return size;
     }
 
-    private void DrawMaskOverlay(WriteableBitmap bitmap, MainViewModel viewModel)
+    private void DrawMaskOverlay(byte[] pixels, MainViewModel viewModel)
     {
         var masks = viewModel.Masks;
         if (masks == null)
             return;
-
-        using var stream = bitmap.PixelBuffer.AsStream();
-        var pixels = new byte[stream.Length];
-        stream.Position = 0;
-        stream.ReadExactly(pixels);
 
         const byte outlineR = 200;
         const byte outlineG = 200;
@@ -269,9 +295,98 @@ public sealed class ImageCanvasControl : Grid
                 BlendPixel(pixels, offset, outlineR, outlineG, outlineB, outlinePixelAlpha);
             }
         }
+    }
 
-        stream.Position = 0;
-        stream.Write(pixels);
+    private static void DrawLiveStrokeOverlay(
+        byte[] pixels,
+        int width,
+        int height,
+        IReadOnlyList<double[]> stroke)
+    {
+        if (stroke.Count == 0)
+            return;
+
+        const byte strokeR = 255;
+        const byte strokeG = 0;
+        const byte strokeB = 255;
+        const float strokeAlpha = 100f / 255f;
+        const int brushSize = 1;
+
+        var points = new List<(int X, int Y)>();
+        for (var i = 0; i < stroke.Count; i++)
+        {
+            var y = (int)stroke[i][1];
+            var x = (int)stroke[i][2];
+            if (i == 0)
+            {
+                points.Add((x, y));
+                continue;
+            }
+
+            var prevY = (int)stroke[i - 1][1];
+            var prevX = (int)stroke[i - 1][2];
+            foreach (var point in LinePoints(prevX, prevY, x, y))
+                points.Add(point);
+        }
+
+        foreach (var (x, y) in points)
+            StampBrush(pixels, width, height, x, y, brushSize, strokeR, strokeG, strokeB, strokeAlpha);
+    }
+
+    private static void StampBrush(
+        byte[] pixels,
+        int width,
+        int height,
+        int centerX,
+        int centerY,
+        int brushSize,
+        byte r,
+        byte g,
+        byte b,
+        float alpha)
+    {
+        var radius = Math.Max(0, brushSize / 2);
+        for (var dy = -radius; dy <= radius; dy++)
+        {
+            for (var dx = -radius; dx <= radius; dx++)
+            {
+                var x = centerX + dx;
+                var y = centerY + dy;
+                if (x < 0 || y < 0 || x >= width || y >= height)
+                    continue;
+
+                BlendPixel(pixels, (y * width + x) * 4, r, g, b, alpha);
+            }
+        }
+    }
+
+    private static IEnumerable<(int X, int Y)> LinePoints(int x0, int y0, int x1, int y1)
+    {
+        var dx = Math.Abs(x1 - x0);
+        var dy = -Math.Abs(y1 - y0);
+        var sx = x0 < x1 ? 1 : -1;
+        var sy = y0 < y1 ? 1 : -1;
+        var err = dx + dy;
+
+        while (true)
+        {
+            yield return (x0, y0);
+            if (x0 == x1 && y0 == y1)
+                break;
+
+            var e2 = 2 * err;
+            if (e2 >= dy)
+            {
+                err += dy;
+                x0 += sx;
+            }
+
+            if (e2 <= dx)
+            {
+                err += dx;
+                y0 += sy;
+            }
+        }
     }
 
     private static void BlendPixel(byte[] pixels, int offset, byte r, byte g, byte b, float alpha)

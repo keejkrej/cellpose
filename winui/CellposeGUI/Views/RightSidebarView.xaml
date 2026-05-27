@@ -99,10 +99,13 @@
                         PlaceholderText="all"
                         HorizontalAlignment="Stretch"
                         Text="{x:Bind ViewModel.ClassFilterText, Mode=TwoWay}" />
-                    <Grid Padding="12,0,8,0" ColumnDefinitions="40,60,*">
+                    <Grid Padding="4,0,8,0" ColumnDefinitions="52,60,*">
                         <CheckBox
                             Grid.Column="0"
+                            Width="20"
+                            Height="20"
                             HorizontalAlignment="Center"
+                            VerticalAlignment="Center"
                             IsThreeState="True"
                             IsChecked="{x:Bind ViewModel.AllInstancesVisible, Mode=TwoWay}" />
                         <TextBlock
@@ -119,19 +122,25 @@
                     <controls:DataGrid
                         x:Name="InstanceGrid"
                         HorizontalAlignment="Stretch"
+                        MinHeight="120"
+                        RowHeight="36"
                         AutoGenerateColumns="False"
                         CanUserReorderColumns="False"
                         CanUserSortColumns="False"
                         GridLinesVisibility="Horizontal"
                         HeadersVisibility="None"
+                        HorizontalScrollBarVisibility="Disabled"
                         SelectionMode="Extended"
                         LoadingRow="InstanceGrid_LoadingRow">
                         <controls:DataGrid.Columns>
-                            <controls:DataGridTemplateColumn Width="40">
+                            <controls:DataGridTemplateColumn Width="52" MinWidth="52">
                                 <controls:DataGridTemplateColumn.CellTemplate>
                                     <DataTemplate x:DataType="vm:InstanceRowViewModel">
                                         <CheckBox
+                                            Width="20"
+                                            Height="20"
                                             HorizontalAlignment="Center"
+                                            VerticalAlignment="Center"
                                             IsChecked="{x:Bind Visible, Mode=TwoWay}" />
                                     </DataTemplate>
                                 </controls:DataGridTemplateColumn.CellTemplate>

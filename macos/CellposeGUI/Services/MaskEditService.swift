@@ -33,14 +33,32 @@ enum MaskEditService {
     }
 
     static func defaultColors(ncells: Int) -> [[UInt8]] {
-        var generator = SeededRandomNumberGenerator(seed: 42)
-        return (0 ..< max(ncells, 0)).map { _ in
-            [
-                UInt8.random(in: 50 ... 255, using: &generator),
-                UInt8.random(in: 50 ... 255, using: &generator),
-                UInt8.random(in: 50 ... 255, using: &generator),
-            ]
+        (0 ..< max(ncells, 0)).map { colorForClass(classID: Int32($0)) }
+    }
+
+    static func colorForClass(classID: Int32) -> [UInt8] {
+        var generator = SeededRandomNumberGenerator(seed: UInt64(42 + Int(classID) * 7919))
+        return [
+            UInt8.random(in: 50 ... 255, using: &generator),
+            UInt8.random(in: 50 ... 255, using: &generator),
+            UInt8.random(in: 50 ... 255, using: &generator),
+        ]
+    }
+
+    static func withClassColors(masks: MaskData, classIDs: [Int32]) -> MaskData {
+        let ncells = masks.labels.isEmpty ? 0 : Int(masks.labels.max() ?? 0)
+        guard ncells > 0 else { return masks }
+        let colors = (0 ..< ncells).map { row in
+            let classID = row < classIDs.count ? classIDs[row] : Int32(0)
+            return colorForClass(classID: classID)
         }
+        return MaskData(
+            width: masks.width,
+            height: masks.height,
+            labels: masks.labels,
+            colors: colors,
+            outlineLabels: masks.outlineLabels
+        )
     }
 
     static func computeOutlineLabels(labels: [Int32], width: Int, height: Int) -> [Int32] {
@@ -115,7 +133,7 @@ enum MaskEditService {
         }
 
         var colors = masks?.colors ?? []
-        let fillColor = color ?? [100, 200, 50]
+        let fillColor = color ?? colorForClass(classID: classID)
         var filledRows: [Int] = []
         var filledCols: [Int] = []
         var outlineRows: [Int] = []

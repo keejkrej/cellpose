@@ -24,7 +24,7 @@ public sealed class InstanceRowViewModel
     public double ClassId
     {
         get => _row < _viewModel.InstanceClasses.Values.Count ? _viewModel.InstanceClasses.Values[_row] : 0;
-        set => _viewModel.InstanceClasses.SetClass(_row, (int)value);
+        set => _viewModel.SetInstanceClass(_row, (int)value);
     }
 
     public bool IsHiddenByFilter
