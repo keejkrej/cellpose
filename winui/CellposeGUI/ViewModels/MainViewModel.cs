@@ -15,7 +15,6 @@ public sealed class MainViewModel : ObservableObject
     private readonly ImageLoaderService _imageLoader;
     private readonly CellposeSessionStore _sessionStore;
     private readonly SeriesDiscoveryService _seriesDiscovery;
-    private readonly ExportService _exportService;
     private readonly SessionState _session = new();
     private readonly DispatcherQueue _dispatcher;
     private bool _seriesNavigationLocked;
@@ -30,8 +29,6 @@ public sealed class MainViewModel : ObservableObject
     private int _selectedCell;
     private bool _showMasks = true;
     private bool _showOutlines = true;
-    private bool _autoloadMasks;
-    private bool _disableAutosave;
     private bool _imageLoaded;
     private bool _isBusy;
     private bool _isSegmentationRunning;
@@ -53,14 +50,12 @@ public sealed class MainViewModel : ObservableObject
         ImageLoaderService imageLoader,
         CellposeSessionStore sessionStore,
         SeriesDiscoveryService seriesDiscovery,
-        ExportService exportService,
         DispatcherQueue dispatcher)
     {
         _ml = ml;
         _imageLoader = imageLoader;
         _sessionStore = sessionStore;
         _seriesDiscovery = seriesDiscovery;
-        _exportService = exportService;
         _dispatcher = dispatcher;
         BindDispatcher(dispatcher);
         SegmentationParams = new SegmentationParameters();
@@ -131,18 +126,6 @@ public sealed class MainViewModel : ObservableObject
     {
         get => _showOutlines;
         set => SetProperty(ref _showOutlines, value);
-    }
-
-    public bool AutoloadMasks
-    {
-        get => _autoloadMasks;
-        set => SetProperty(ref _autoloadMasks, value);
-    }
-
-    public bool DisableAutosave
-    {
-        get => _disableAutosave;
-        set => SetProperty(ref _disableAutosave, value);
     }
 
     public bool ImageLoaded
@@ -406,7 +389,7 @@ public sealed class MainViewModel : ObservableObject
     private async Task<(ImageData Image, LoadedSession? Companion)> LoadImageWithOptionalCompanionAsync(string path)
     {
         var image = await Task.Run(() => _imageLoader.Load(path));
-        if (_autoloadMasks || !File.Exists(_sessionStore.DefaultPath(path)))
+        if (!File.Exists(_sessionStore.DefaultPath(path)))
             return (image, null);
 
         var companion = await Task.Run(() =>
@@ -488,7 +471,7 @@ public sealed class MainViewModel : ObservableObject
 
     private void SaveSessionIfNeeded()
     {
-        if (_disableAutosave || _session.ImagePath == null || _session.Masks == null)
+        if (_session.ImagePath == null || _session.Masks == null)
             return;
 
         _session.Segmentation = CloneSegmentationParams();
@@ -574,13 +557,6 @@ public sealed class MainViewModel : ObservableObject
             ApplyLoadedImage(path, image);
             StatusMessage = $"Loaded {Path.GetFileName(path)}";
         });
-
-    public async Task LoadSegPanelAsync()
-    {
-        var path = await PickFileAsync([".cellpose"]);
-        if (path != null)
-            await LoadSegAsync(path);
-    }
 
     public async Task LoadSegAsync(string path) =>
         await RunTaskAsync("Loading segmentation…", async () =>
@@ -822,7 +798,7 @@ public sealed class MainViewModel : ObservableObject
         DisplayParams.GrayHigh = high;
     }
 
-    public async Task SaveSegAsync()
+    public async Task SaveResultsAsync()
     {
         if (_session.ImagePath == null || _session.Masks == null)
             return;
@@ -838,50 +814,6 @@ public sealed class MainViewModel : ObservableObject
             StatusMessage = $"Saved {Path.GetFileName(path)}";
         });
     }
-
-    public async Task ExportMasksAsync()
-    {
-        await ExportWithPanelAsync("_cp_masks.png", [".png", ".tif", ".tiff"], (path) =>
-        {
-            if (_session.Masks == null)
-                throw new SidecarException("No masks to export");
-            var format = path.Contains("tif", StringComparison.OrdinalIgnoreCase) ? "tif" : "png";
-            _exportService.ExportMasks(_session.Masks, path, format);
-            return path;
-        });
-    }
-
-    public async Task LoadMasksPanelAsync()
-    {
-        var path = await PickFileAsync([".tif", ".tiff", ".png"]);
-        if (path != null)
-            StatusMessage = $"Load masks not yet wired for {Path.GetFileName(path)}";
-    }
-
-    public async Task ExportOutlinesAsync() =>
-        await ExportWithPanelAsync("_outline.txt", [".txt"], path =>
-        {
-            if (_session.Masks == null)
-                throw new SidecarException("No masks to export");
-            _exportService.ExportOutlines(_session.Masks, path);
-            return path;
-        });
-
-    public async Task ExportFlowsAsync() =>
-        await ExportWithPanelAsync("_flows.tif", [".tif", ".tiff"], path =>
-        {
-            _exportService.ExportFlows(_session.Flows, path);
-            return path;
-        });
-
-    public async Task ExportROIsAsync() =>
-        await ExportWithPanelAsync("_rois.zip", [".zip"], path =>
-        {
-            if (_session.Masks == null)
-                throw new SidecarException("No masks to export");
-            _exportService.ExportRois(_session.Masks, path);
-            return path;
-        });
 
     public async Task ClearAllMasksAsync()
     {
@@ -1185,26 +1117,6 @@ public sealed class MainViewModel : ObservableObject
         _ => record.Z,
     };
 
-    private async Task ExportWithPanelAsync(
-        string defaultSuffix,
-        IReadOnlyList<string> extensions,
-        Func<string, string> export)
-    {
-        if (_filename == null)
-            return;
-
-        var defaultName = Path.GetFileNameWithoutExtension(_filename) + defaultSuffix;
-        var path = await PickSaveFileAsync(defaultName, extensions);
-        if (path == null)
-            return;
-
-        await RunTaskAsync("Exporting…", async () =>
-        {
-            var saved = await Task.Run(() => export(path));
-            StatusMessage = $"Exported {Path.GetFileName(saved)}";
-        });
-    }
-
     private async Task RunTaskAsync(
         string message,
         Func<Task> operation,
@@ -1307,9 +1219,6 @@ public sealed class MainViewModel : ObservableObject
     private Task<string?> PickFolderAsync() =>
         RunOnUiAsync(() => PickFolderAsyncCore());
 
-    private Task<string?> PickSaveFileAsync(string suggestedName, IReadOnlyList<string> extensions) =>
-        RunOnUiAsync(() => PickSaveFileAsyncCore(suggestedName, extensions));
-
     private static async Task<string?> PickFileAsyncCore(IReadOnlyList<string> extensions)
     {
         var picker = new FileOpenPicker
@@ -1334,21 +1243,6 @@ public sealed class MainViewModel : ObservableObject
         return folder?.Path;
     }
 
-    private static async Task<string?> PickSaveFileAsyncCore(string suggestedName, IReadOnlyList<string> extensions)
-    {
-        var picker = new FileSavePicker
-        {
-            SuggestedFileName = Path.GetFileNameWithoutExtension(suggestedName),
-            SuggestedStartLocation = PickerLocationId.ComputerFolder,
-        };
-        InitializePicker(picker);
-        foreach (var extension in extensions)
-            picker.FileTypeChoices.Add(extension.TrimStart('.').ToUpperInvariant(), [extension]);
-
-        var file = await picker.PickSaveFileAsync();
-        return file?.Path;
-    }
-
     private static void InitializePicker(object picker)
     {
         var hwnd = GetWindowHandle();
@@ -1356,7 +1250,5 @@ public sealed class MainViewModel : ObservableObject
             InitializeWithWindow.Initialize(openPicker, hwnd);
         else if (picker is FolderPicker folderPicker)
             InitializeWithWindow.Initialize(folderPicker, hwnd);
-        else if (picker is FileSavePicker savePicker)
-            InitializeWithWindow.Initialize(savePicker, hwnd);
     }
 }

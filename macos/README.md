@@ -1,6 +1,6 @@
 # Cellpose SwiftUI GUI (macOS)
 
-Native macOS SwiftUI front-end for Cellpose. Image I/O, mask editing, series navigation, export, and `*_seg.cellpose` session files are handled locally in Swift. ML inference, recompute, training, and model management go through a local Python sidecar.
+Native macOS SwiftUI front-end for Cellpose. Image I/O, mask editing, series navigation, and `*_seg.cellpose` session files are handled locally in Swift. ML inference, recompute, training, and model management go through a local Python sidecar.
 
 ## Requirements
 
@@ -39,13 +39,13 @@ Set environment variables in the Xcode scheme if needed:
 ## Architecture
 
 ```
-SwiftUI app (local):  image load, masks, export, series, .cellpose I/O
+SwiftUI app (local):  image load, masks, series, .cellpose I/O
         ↓ HTTP (ML only)
 Python sidecar:       /infer, /recompute, /train, /models
 ```
 
 - **SwiftUI app** (`macos/CellposeGUI/`): 3-column layout, image canvas, menus, editing
-- **Local services**: `ImageLoaderService`, `CellposeSessionStore`, `MaskEditService`, `SeriesDiscoveryService`, `ExportService`
+- **Local services**: `ImageLoaderService`, `CellposeSessionStore`, `MaskEditService`, `SeriesDiscoveryService`
 - **MlInferenceEngine protocol**: narrow ML abstraction (`SidecarMlEngine` today)
 - **Python sidecar** (`cellpose/gui/sidecar/`): stateless FastAPI server for inference, recompute, training
 

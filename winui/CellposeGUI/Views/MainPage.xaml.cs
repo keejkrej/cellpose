@@ -59,58 +59,10 @@ public sealed partial class MainPage : Page
             await ShowLoadFolderDialogAsync();
         };
 
-        AutoloadMasksItem.Click += (_, _) =>
+        SaveResultsItem.Click += async (_, _) =>
         {
             if (_viewModel != null)
-                _viewModel.AutoloadMasks = AutoloadMasksItem.IsChecked;
-        };
-
-        DisableAutosaveItem.Click += (_, _) =>
-        {
-            if (_viewModel != null)
-                _viewModel.DisableAutosave = DisableAutosaveItem.IsChecked;
-        };
-
-        LoadMasksItem.Click += async (_, _) =>
-        {
-            if (_viewModel != null)
-                await _viewModel.LoadMasksPanelAsync();
-        };
-
-        LoadSegItem.Click += async (_, _) =>
-        {
-            if (_viewModel != null)
-                await _viewModel.LoadSegPanelAsync();
-        };
-
-        SaveSegItem.Click += async (_, _) =>
-        {
-            if (_viewModel != null)
-                await _viewModel.SaveSegAsync();
-        };
-
-        ExportMasksItem.Click += async (_, _) =>
-        {
-            if (_viewModel != null)
-                await _viewModel.ExportMasksAsync();
-        };
-
-        ExportOutlinesItem.Click += async (_, _) =>
-        {
-            if (_viewModel != null)
-                await _viewModel.ExportOutlinesAsync();
-        };
-
-        ExportROIsItem.Click += async (_, _) =>
-        {
-            if (_viewModel != null)
-                await _viewModel.ExportROIsAsync();
-        };
-
-        ExportFlowsItem.Click += async (_, _) =>
-        {
-            if (_viewModel != null)
-                await _viewModel.ExportFlowsAsync();
+                await _viewModel.SaveResultsAsync();
         };
 
         UndoItem.Click += (_, _) => _viewModel?.UndoAction();
@@ -158,7 +110,7 @@ public sealed partial class MainPage : Page
 
             var dialog = new ContentDialog
             {
-                Title = "Load Folder with Pattern",
+                Title = "Load folder",
                 PrimaryButtonText = "Load",
                 CloseButtonText = "Cancel",
                 DefaultButton = ContentDialogButton.Primary,
@@ -275,18 +227,10 @@ public sealed partial class MainPage : Page
         CellCountText.Text = $"{_viewModel.Ncells} cells";
         ZoomText.Text = "100%";
 
-        LoadMasksItem.IsEnabled = _viewModel.ImageLoaded;
-        SaveSegItem.IsEnabled = _viewModel.CanSaveMasks;
-        ExportMasksItem.IsEnabled = _viewModel.CanSaveMasks;
-        ExportOutlinesItem.IsEnabled = _viewModel.CanSaveMasks;
-        ExportROIsItem.IsEnabled = _viewModel.CanSaveMasks;
-        ExportFlowsItem.IsEnabled = _viewModel.CanSaveMasks;
+        SaveResultsItem.IsEnabled = _viewModel.CanSaveMasks;
         ClearMasksItem.IsEnabled = _viewModel.CanSaveMasks;
         RemoveModelItem.IsEnabled = _viewModel.IsCustomModel;
         TrainModelItem.IsEnabled = _viewModel.ImageLoaded;
-
-        AutoloadMasksItem.IsChecked = _viewModel.AutoloadMasks;
-        DisableAutosaveItem.IsChecked = _viewModel.DisableAutosave;
     }
 
     private void OnViewModelPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)

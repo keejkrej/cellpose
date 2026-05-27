@@ -284,7 +284,7 @@ class MainPresenter:
         if self.view.ncells() == 0:
             self.view.ClearButton.setEnabled(False)
         if self.view.NZ == 1:
-            io._save_sets_with_check(self.view)
+            io._save_sets(self.view)
 
     def add_set(self) -> None:
         if len(self.view.current_point_set) > 0:
@@ -306,7 +306,7 @@ class MainPresenter:
                     self.view._sync_ncells_counter()
                     self.view.draw_layer()
                     if self.view.NZ == 1:
-                        io._save_sets_with_check(self.view)
+                        io._save_sets(self.view)
             else:
                 print("GUI_ERROR: cell too small, not drawn")
             self.view.current_stroke = []

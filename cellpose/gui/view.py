@@ -669,9 +669,6 @@ class MainView(QMainWindow):
         if event.key() == QtCore.Qt.Key_Minus or event.key() == QtCore.Qt.Key_Equal:
             self.p0.keyPressEvent(event)
 
-    def autosave_enabled(self):
-        return not self.disableAutosave.isChecked()
-
     def default_class_id(self):
         text = self.DefaultClassEdit.text().strip()
         return int(text) if text else 0
@@ -714,7 +711,6 @@ class MainView(QMainWindow):
         self.autoSaturationButton.setEnabled(True)
 
         self.newmodel.setEnabled(True)
-        self.loadMasks.setEnabled(True)
 
         self.sliders[0].setEnabled(True)
 
@@ -728,12 +724,7 @@ class MainView(QMainWindow):
         for i in range(len(self.StyleButtons)):
             self.StyleButtons[i].setEnabled(False)
         self.newmodel.setEnabled(False)
-        self.loadMasks.setEnabled(False)
-        self.saveSet.setEnabled(False)
-        self.savePNG.setEnabled(False)
-        self.saveFlows.setEnabled(False)
-        self.saveOutlines.setEnabled(False)
-        self.saveROIs.setEnabled(False)
+        self.saveResults.setEnabled(False)
         if hasattr(self, "RectSelectButton"):
             self.RectSelectButton.setEnabled(False)
             if self.RectSelectButton.isChecked():
@@ -902,21 +893,10 @@ class MainView(QMainWindow):
             return
         self.presenter.set_instance_class(row, class_id)
         if self.loaded:
-            io._save_sets_with_check(self)
+            io._save_sets(self)
 
     def toggle_saving(self):
-        if self.ncells() > 0:
-            self.saveSet.setEnabled(True)
-            self.savePNG.setEnabled(True)
-            self.saveFlows.setEnabled(True)
-            self.saveOutlines.setEnabled(True)
-            self.saveROIs.setEnabled(True)
-        else:
-            self.saveSet.setEnabled(False)
-            self.savePNG.setEnabled(False)
-            self.saveFlows.setEnabled(False)
-            self.saveOutlines.setEnabled(False)
-            self.saveROIs.setEnabled(False)
+        self.saveResults.setEnabled(self.ncells() > 0)
 
     def toggle_removals(self):
         if self.ncells() > 0:
@@ -1564,7 +1544,7 @@ class MainView(QMainWindow):
             self.remove_cell(self.selected)
             print("GUI_INFO: merged two cells")
             self.update_layer()
-            io._save_sets_with_check(self)
+            io._save_sets(self)
             self.undo.setEnabled(False)
             self.redo.setEnabled(False)
 
@@ -1585,7 +1565,7 @@ class MainView(QMainWindow):
             self.zdraw.append([])
             print(">>> added back removed cell")
             self.update_layer()
-            io._save_sets_with_check(self)
+            io._save_sets(self)
             self.removed_cell = []
             self.redo.setEnabled(False)
 

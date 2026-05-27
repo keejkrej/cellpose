@@ -77,7 +77,6 @@ public partial class App : Application
                 new ImageLoaderService(),
                 new CellposeSessionStore(),
                 new SeriesDiscoveryService(),
-                new ExportService(),
                 dispatcher);
             await viewModel.RefreshModelsAsync().ConfigureAwait(false);
 

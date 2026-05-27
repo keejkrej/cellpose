@@ -9,7 +9,7 @@ struct LoadFolderPatternSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("Load Folder with Pattern")
+            Text("Load folder")
                 .font(.title2)
 
             Text("Use placeholders {t}, {p}, {c}, {z}. Subfolder matching is case-insensitive.")

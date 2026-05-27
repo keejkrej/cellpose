@@ -8,68 +8,21 @@ from . import io
 def mainmenu(parent):
     main_menu = parent.menuBar()
     file_menu = main_menu.addMenu("&File")
-    # load processed data
-    loadImg = QAction("&Load image (*.tif, *.png, *.jpg)", parent)
+    loadImg = QAction("&Load image", parent)
     loadImg.setShortcut("Ctrl+L")
     loadImg.triggered.connect(lambda: io._load_image(parent))
     file_menu.addAction(loadImg)
 
-    loadFolderPattern = QAction("Load &folder with pattern...", parent)
+    loadFolderPattern = QAction("Load &folder", parent)
     loadFolderPattern.setShortcut("Ctrl+Shift+L")
     loadFolderPattern.triggered.connect(lambda: io._load_image_series(parent))
     file_menu.addAction(loadFolderPattern)
 
-    parent.autoloadMasks = QAction("Autoload masks from _masks.tif file", parent,
-                                   checkable=True)
-    parent.autoloadMasks.setChecked(False)
-    file_menu.addAction(parent.autoloadMasks)
-
-    parent.disableAutosave = QAction("Disable autosave _seg.cellpose file", parent,
-                                     checkable=True)
-    parent.disableAutosave.setChecked(False)
-    file_menu.addAction(parent.disableAutosave)
-
-    parent.loadMasks = QAction("Load &masks (*.tif, *.png, *.jpg)", parent)
-    parent.loadMasks.setShortcut("Ctrl+M")
-    parent.loadMasks.triggered.connect(lambda: io._load_masks(parent))
-    file_menu.addAction(parent.loadMasks)
-    parent.loadMasks.setEnabled(False)
-
-    loadManual = QAction("Load &processed/labelled image (*_seg.cellpose)", parent)
-    loadManual.setShortcut("Ctrl+P")
-    loadManual.triggered.connect(lambda: io._load_seg(parent))
-    file_menu.addAction(loadManual)
-
-    parent.saveSet = QAction("&Save masks and image (as *_seg.cellpose)", parent)
-    parent.saveSet.setShortcut("Ctrl+S")
-    parent.saveSet.triggered.connect(lambda: io._save_sets(parent))
-    file_menu.addAction(parent.saveSet)
-    parent.saveSet.setEnabled(False)
-
-    parent.savePNG = QAction("Save masks as P&NG/tif", parent)
-    parent.savePNG.setShortcut("Ctrl+N")
-    parent.savePNG.triggered.connect(lambda: io._save_png(parent))
-    file_menu.addAction(parent.savePNG)
-    parent.savePNG.setEnabled(False)
-
-    parent.saveOutlines = QAction("Save &Outlines as text for imageJ", parent)
-    parent.saveOutlines.setShortcut("Ctrl+O")
-    parent.saveOutlines.triggered.connect(lambda: io._save_outlines(parent))
-    file_menu.addAction(parent.saveOutlines)
-    parent.saveOutlines.setEnabled(False)
-
-    parent.saveROIs = QAction("Save outlines as .zip archive of &ROI files for ImageJ",
-                              parent)
-    parent.saveROIs.setShortcut("Ctrl+R")
-    parent.saveROIs.triggered.connect(lambda: io._save_rois(parent))
-    file_menu.addAction(parent.saveROIs)
-    parent.saveROIs.setEnabled(False)
-
-    parent.saveFlows = QAction("Save &Flows and cellprob as tif", parent)
-    parent.saveFlows.setShortcut("Ctrl+F")
-    parent.saveFlows.triggered.connect(lambda: io._save_flows(parent))
-    file_menu.addAction(parent.saveFlows)
-    parent.saveFlows.setEnabled(False)
+    parent.saveResults = QAction("&Save results", parent)
+    parent.saveResults.setShortcut("Ctrl+S")
+    parent.saveResults.triggered.connect(lambda: io._save_sets(parent))
+    file_menu.addAction(parent.saveResults)
+    parent.saveResults.setEnabled(False)
 
 
 def editmenu(parent):

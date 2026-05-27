@@ -1,6 +1,6 @@
 # Cellpose WinUI GUI (Windows)
 
-Native Windows WinUI 3 front-end for Cellpose. The app owns image I/O, mask editing, export, series navigation, and session files locally. A slim Python sidecar handles ML only (inference, flow-based recompute, training, model registry).
+Native Windows WinUI 3 front-end for Cellpose. The app owns image I/O, mask editing, series navigation, and session files locally. A slim Python sidecar handles ML only (inference, flow-based recompute, training, model registry).
 
 ## Requirements
 
@@ -40,8 +40,8 @@ Set environment variables if needed:
 
 ## Architecture
 
-- **WinUI app** (`winui/CellposeGUI/`): UI, canvas, local session state, mask editing, export, series discovery
-- **Local services**: `ImageLoaderService`, `CellposeSessionStore`, `MaskEditService`, `SeriesDiscoveryService`, `ExportService`
+- **WinUI app** (`winui/CellposeGUI/`): UI, canvas, local session state, mask editing, series discovery
+- **Local services**: `ImageLoaderService`, `CellposeSessionStore`, `MaskEditService`, `SeriesDiscoveryService`
 - **IMlInferenceEngine** / **SidecarMlEngine**: HTTP client for ML-only sidecar endpoints
 - **Python sidecar** (`cellpose/gui/sidecar/`): stateless `/infer`, `/recompute`, `/train`, `/models`
 - **Session format** (`cellpose/gui/session_format/`): portable `{stem}_seg.cellpose` zip archives (manifest + raw arrays)

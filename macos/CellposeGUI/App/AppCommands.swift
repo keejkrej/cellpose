@@ -19,67 +19,22 @@ struct AppCommands: Commands {
         CommandGroup(replacing: .saveItem) {}
 
         CommandMenu("File") {
-            Button("Load image (*.tif, *.png, *.jpg)") {
+            Button("Load image") {
                 Task { await viewModel?.loadImagePanel() }
             }
             .keyboardShortcut("l", modifiers: [.command])
 
-            Button("Load folder with pattern...") {
+            Button("Load folder") {
                 viewModel?.presentLoadFolderPanel()
             }
             .keyboardShortcut("l", modifiers: [.command, .shift])
 
-            Toggle("Autoload masks from _masks.tif file", isOn: Binding(
-                get: { viewModel?.autoloadMasks ?? false },
-                set: { viewModel?.autoloadMasks = $0 }
-            ))
-
-            Toggle("Disable autosave _seg.cellpose file", isOn: Binding(
-                get: { viewModel?.disableAutosave ?? false },
-                set: { viewModel?.disableAutosave = $0 }
-            ))
-
-            Button("Load masks (*.tif, *.png, *.jpg)") {
-                Task { await viewModel?.loadMasksPanel() }
-            }
-            .keyboardShortcut("m", modifiers: [.command])
-            .disabled(!(viewModel?.imageLoaded ?? false))
-
-            Button("Load processed/labelled image (*_seg.cellpose)") {
-                Task { await viewModel?.loadSegPanel() }
-            }
-            .keyboardShortcut("p", modifiers: [.command])
-
             Divider()
 
-            Button("Save masks and image (as *_seg.cellpose)") {
-                Task { await viewModel?.saveSeg() }
+            Button("Save results") {
+                Task { await viewModel?.saveResults() }
             }
             .keyboardShortcut("s", modifiers: [.command])
-            .disabled(!(viewModel?.canSaveMasks ?? false))
-
-            Button("Save masks as PNG/tif") {
-                Task { await viewModel?.exportMasks() }
-            }
-            .keyboardShortcut("n", modifiers: [.command])
-            .disabled(!(viewModel?.canSaveMasks ?? false))
-
-            Button("Save outlines as text for imageJ") {
-                Task { await viewModel?.exportOutlines() }
-            }
-            .keyboardShortcut("o", modifiers: [.command])
-            .disabled(!(viewModel?.canSaveMasks ?? false))
-
-            Button("Save outlines as .zip archive of ROI files for ImageJ") {
-                Task { await viewModel?.exportROIs() }
-            }
-            .keyboardShortcut("r", modifiers: [.command])
-            .disabled(!(viewModel?.canSaveMasks ?? false))
-
-            Button("Save flows and cellprob as tif") {
-                Task { await viewModel?.exportFlows() }
-            }
-            .keyboardShortcut("f", modifiers: [.command])
             .disabled(!(viewModel?.canSaveMasks ?? false))
         }
 

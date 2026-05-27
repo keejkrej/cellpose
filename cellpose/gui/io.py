@@ -8,9 +8,9 @@ import cv2
 import fastremap
 import shutil
 
-from ..io import imread, imread_2D, imread_3D, imsave, outlines_to_text, save_rois
+from ..io import imread, imread_2D, imread_3D
 from ..models import normalize_default, MODEL_DIR, MODEL_LIST_PATH, get_user_models
-from ..utils import masks_to_outlines, outlines_list
+from ..utils import masks_to_outlines
 
 try:
     from PySide6.QtWidgets import (
@@ -272,23 +272,11 @@ def _load_image(parent, filename=None, load_seg=True, load_3D=False):
             return
     _clear_series_state(parent)
     manual_file = os.path.splitext(filename)[0] + "_seg.cellpose"
-    load_mask = False
-    if load_seg:
-        if os.path.isfile(manual_file) and not parent.autoloadMasks.isChecked():
-            if filename is not None:
-                image = (imread_2D(filename) if not load_3D else 
-                         imread_3D(filename))
-            else:
-                image = None
-            _load_seg(parent, manual_file, image=image, image_file=filename,
-                      load_3D=load_3D)
-            return
-        elif parent.autoloadMasks.isChecked():
-            mask_file = os.path.splitext(filename)[0] + "_masks" + os.path.splitext(
-                filename)[-1]
-            mask_file = os.path.splitext(filename)[
-                0] + "_masks.tif" if not os.path.isfile(mask_file) else mask_file
-            load_mask = True if os.path.isfile(mask_file) else False
+    if load_seg and os.path.isfile(manual_file):
+        image = imread_2D(filename) if not load_3D else imread_3D(filename)
+        _load_seg(parent, manual_file, image=image, image_file=filename,
+                  load_3D=load_3D)
+        return
     try:
         print(f"GUI_INFO: loading image: {filename}")
         if not load_3D:
@@ -310,10 +298,8 @@ def _load_image(parent, filename=None, load_seg=True, load_3D=False):
         _initialize_images(parent, image, load_3D=load_3D)
         parent.loaded = True
         parent.enable_buttons()
-        if load_mask:
-            _load_masks(parent, filename=mask_file)
 
-        
+
 def _initialize_images(parent, image, load_3D=False):
     """ format image for GUI
 
@@ -407,17 +393,12 @@ def _apply_cellpose_segmentation_widgets(parent, segmentation) -> None:
         parent.seg_param_root.param("diameter").setValue(float(segmentation.diameter))
 
 
-def _load_seg(parent, filename=None, image=None, image_file=None, load_3D=False):
+def _load_seg(parent, filename, image=None, image_file=None, load_3D=False):
     """Load a *_seg.cellpose session archive."""
     from cellpose.gui.session_format import read_session
 
-    if filename is None:
-        name = QFileDialog.getOpenFileName(
-            parent, "Load labelled data", filter="*.cellpose"
-        )
-        filename = name[0]
-        if filename == "":
-            return
+    if not filename:
+        return
 
     try:
         session_data = read_session(filename)
@@ -494,43 +475,6 @@ def _load_seg(parent, filename=None, image=None, image_file=None, load_3D=False)
     parent.enable_buttons()
     parent.update_layer()
     gc.collect()
-
-
-def _load_masks(parent, filename=None):
-    """ load zeros-based masks (0=no cell, 1=cell 1, ...) """
-    if filename is None:
-        name = QFileDialog.getOpenFileName(parent, "Load masks (PNG or TIFF)")
-        filename = name[0]
-    print(f"GUI_INFO: loading masks: {filename}")
-    masks = imread(filename)
-    outlines = None
-    if masks.ndim > 3:
-        # Z x nchannels x Ly x Lx
-        if masks.shape[-1] > 5:
-            parent.flows = list(np.transpose(masks[:, :, :, 2:], (3, 0, 1, 2)))
-            outlines = masks[..., 1]
-            masks = masks[..., 0]
-        else:
-            parent.flows = list(np.transpose(masks[:, :, :, 1:], (3, 0, 1, 2)))
-            masks = masks[..., 0]
-    elif masks.ndim == 3:
-        if masks.shape[-1] < 5:
-            masks = masks[np.newaxis, :, :, 0]
-    elif masks.ndim < 3:
-        masks = masks[np.newaxis, :, :]
-    # masks should be Z x Ly x Lx
-    if masks.shape[0] != parent.NZ:
-        print("ERROR: masks are not same depth (number of planes) as image stack")
-        return
-
-    _masks_to_gui(parent, masks, outlines)
-    if parent.ncells() > 0:
-        parent.draw_layer()
-        parent.toggle_mask_ops()
-    del masks
-    gc.collect()
-    parent.update_layer()
-    parent.update_plot()
 
 
 def _masks_to_gui(parent, masks, outlines=None, colors=None):
@@ -625,68 +569,6 @@ def _masks_to_gui(parent, masks, outlines=None, colors=None):
         print("set denoised/filtered view")
     else:
         parent.ViewDropDown.setCurrentIndex(0)
-
-
-def _save_png(parent):
-    """ save masks to png or tiff (if 3D) """
-    filename = _get_output_filename(parent)
-    base = os.path.splitext(filename)[0]
-    if parent.NZ == 1:
-        if parent.cellpix[0].max() > 65534:
-            print("GUI_INFO: saving 2D masks to tif (too many masks for PNG)")
-            imsave(base + "_cp_masks.tif", parent.cellpix[0])
-        else:
-            print("GUI_INFO: saving 2D masks to png")
-            imsave(base + "_cp_masks.png", parent.cellpix[0].astype(np.uint16))
-    else:
-        print("GUI_INFO: saving 3D masks to tiff")
-        imsave(base + "_cp_masks.tif", parent.cellpix)
-
-
-def _save_flows(parent):
-    """ save flows and cellprob to tiff """
-    filename = _get_output_filename(parent)
-    base = os.path.splitext(filename)[0]
-    print("GUI_INFO: saving flows and cellprob to tiff")
-    if len(parent.flows) > 0:
-        imsave(base + "_cp_cellprob.tif", parent.flows[1])
-        for i in range(3):
-            imsave(base + f"_cp_flows_{i}.tif", parent.flows[0][..., i])
-        if len(parent.flows) > 2:
-            imsave(base + "_cp_flows.tif", parent.flows[2])
-        print("GUI_INFO: saved flows and cellprob")
-    else:
-        print("ERROR: no flows or cellprob found")
-
-
-def _save_rois(parent):
-    """ save masks as rois in .zip file for ImageJ """
-    filename = _get_output_filename(parent)
-    if parent.NZ == 1:
-        print(
-            f"GUI_INFO: saving {parent.cellpix[0].max()} ImageJ ROIs to .zip archive.")
-        save_rois(parent.cellpix[0], parent.filename)
-    else:
-        print("ERROR: cannot save 3D outlines")
-
-
-def _save_outlines(parent):
-    filename = _get_output_filename(parent)
-    base = os.path.splitext(filename)[0]
-    if parent.NZ == 1:
-        print(
-            "GUI_INFO: saving 2D outlines to text file, see docs for info to load into ImageJ"
-        )
-        outlines = outlines_list(parent.cellpix[0])
-        outlines_to_text(base, outlines)
-    else:
-        print("ERROR: cannot save 3D outlines")
-
-
-def _save_sets_with_check(parent):
-    """Save masks to *_seg.cellpose when autosave is enabled."""
-    if not parent.disableAutosave.isChecked():
-        _save_sets(parent)
 
 
 def _save_sets(parent):

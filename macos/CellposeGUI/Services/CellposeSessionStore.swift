@@ -106,6 +106,64 @@ final class CellposeSessionStore {
         return loaded
     }
 
+    func loadCompanion(sessionPath: String, imagePath: String, image: ImageData) throws -> LoadedSession {
+        var loaded: LoadedSession?
+        try ZipArchiveHelper.withExtractedArchive(from: URL(fileURLWithPath: sessionPath)) { root in
+            let manifestURL = root.appendingPathComponent("manifest.json")
+            let manifestData = try Data(contentsOf: manifestURL)
+            let manifest = try JSONDecoder.snakeCase.decode(SessionManifest.self, from: manifestData)
+            guard manifest.version == 1 else {
+                throw SidecarError.serverError("Unsupported session version: \(manifest.version)")
+            }
+
+            guard let masksEntry = manifest.arrays["masks"] else {
+                throw SidecarError.serverError("Invalid session file: missing masks")
+            }
+            let labels = try readMaskLabels(root: root, entry: masksEntry)
+            let colors: [[UInt8]]
+            if let colorsEntry = manifest.arrays["colors"] {
+                colors = try readColors(root: root, entry: colorsEntry)
+            } else {
+                colors = MaskEditService.defaultColors(ncells: Int(labels.max() ?? 0))
+            }
+
+            var flows: [ArrayPayload] = []
+            var index = 0
+            while let flowEntry = manifest.arrays["flows_\(index)"] {
+                flows.append(try readPayload(root: root, entry: flowEntry))
+                index += 1
+            }
+
+            let width = masksEntry.shape[masksEntry.shape.count - 1]
+            let height = masksEntry.shape[masksEntry.shape.count - 2]
+            if width != image.width || height != image.height {
+                throw SidecarError.serverError(
+                    "Session mask size \(width)x\(height) does not match image \(image.width)x\(image.height)"
+                )
+            }
+
+            let maskData = MaskData(
+                width: width,
+                height: height,
+                labels: labels,
+                colors: colors,
+                outlineLabels: MaskEditService.computeOutlineLabels(labels: labels, width: width, height: height)
+            )
+
+            loaded = LoadedSession(
+                imagePath: imagePath,
+                image: image,
+                masks: maskData,
+                flows: flows,
+                recomputeMasks: manifest.recomputeMasks,
+                model: manifest.model,
+                segmentation: manifest.segmentation
+            )
+        }
+        guard let loaded else { throw SidecarError.invalidResponse }
+        return loaded
+    }
+
     private func writeUInt16Array(
         to directory: URL,
         arrays: inout [String: ManifestArray],

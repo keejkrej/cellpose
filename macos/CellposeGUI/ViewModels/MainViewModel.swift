@@ -12,8 +12,6 @@ final class MainViewModel {
     var selectedCell: Int32 = 0
     var showMasks = true
     var showOutlines = true
-    var autoloadMasks = false
-    var disableAutosave = false
     var imageLoaded = false
     var showLoadFolderSheet = false
     var showTrainDialog = false
@@ -53,7 +51,6 @@ final class MainViewModel {
     private let ml: MlInferenceEngine
     private let sessionStore = CellposeSessionStore()
     private let seriesDiscovery = SeriesDiscoveryService()
-    private let exportService = ExportService()
     private let session = SessionState()
 
     private var seriesDataset: SeriesDatasetPayload?
@@ -160,7 +157,7 @@ final class MainViewModel {
     }
 
     private func saveSessionIfNeeded() {
-        guard !disableAutosave, session.imagePath != nil, session.masks != nil else { return }
+        guard session.imagePath != nil, session.masks != nil else { return }
         session.segmentation = cloneSegmentationParams()
         session.model = selectedModel
         let path = sessionStore.defaultPath(imagePath: session.imagePath!)
@@ -184,17 +181,29 @@ final class MainViewModel {
 
     func loadImage(path: String) async {
         await runTask(message: "Loading image…") {
-            let loadedImage = try await Task.detached {
-                try ImageLoaderService().load(path: path)
-            }.value
-            self.applyLoadedImage(path: path, image: loadedImage)
-            self.statusMessage = "Loaded \(URL(fileURLWithPath: path).lastPathComponent)"
+            let (loadedImage, companion) = try await self.loadImageWithOptionalCompanion(path: path)
+            if let companion {
+                self.applyLoadedSession(companion)
+                self.statusMessage = "Loaded \(URL(fileURLWithPath: path).lastPathComponent) with segmentation"
+            } else {
+                self.applyLoadedImage(path: path, image: loadedImage)
+                self.statusMessage = "Loaded \(URL(fileURLWithPath: path).lastPathComponent)"
+            }
         }
     }
 
-    func loadSegPanel() async {
-        guard let url = pickFile(allowedTypes: ["cellpose"]) else { return }
-        await loadSeg(path: url.path)
+    private func loadImageWithOptionalCompanion(path: String) async throws -> (ImageData, LoadedSession?) {
+        let loadedImage = try await Task.detached {
+            try ImageLoaderService().load(path: path)
+        }.value
+        let sessionPath = sessionStore.defaultPath(imagePath: path)
+        guard FileManager.default.fileExists(atPath: sessionPath) else {
+            return (loadedImage, nil)
+        }
+        let companion = try? await Task.detached {
+            try CellposeSessionStore().loadCompanion(sessionPath: sessionPath, imagePath: path, image: loadedImage)
+        }.value
+        return (loadedImage, companion)
     }
 
     func loadSeg(path: String) async {
@@ -234,10 +243,12 @@ final class MainViewModel {
             if let recordIndex = self.resolveCurrentSeriesRecordIndex() {
                 self.seriesState.recordIndex = recordIndex
                 let record = discovery.records[recordIndex]
-                let loadedImage = try await Task.detached {
-                    try ImageLoaderService().load(path: record.path)
-                }.value
-                self.applyLoadedImage(path: record.path, image: loadedImage)
+                let (loadedImage, companion) = try await self.loadImageWithOptionalCompanion(path: record.path)
+                if let companion {
+                    self.applyLoadedSession(companion)
+                } else {
+                    self.applyLoadedImage(path: record.path, image: loadedImage)
+                }
             }
             self.statusMessage = "Loaded series with \(discovery.recordCount) records"
         }
@@ -284,10 +295,12 @@ final class MainViewModel {
         syncSeriesSlidersToRecordIndex()
         guard let record = seriesState.currentRecord else { return }
         await runTask(message: "Loading frame…") {
-            let loadedImage = try await Task.detached {
-                try ImageLoaderService().load(path: record.path)
-            }.value
-            self.applyLoadedImage(path: record.path, image: loadedImage)
+            let (loadedImage, companion) = try await self.loadImageWithOptionalCompanion(path: record.path)
+            if let companion {
+                self.applyLoadedSession(companion)
+            } else {
+                self.applyLoadedImage(path: record.path, image: loadedImage)
+            }
             self.statusMessage = record.label
         }
     }
@@ -298,10 +311,12 @@ final class MainViewModel {
         seriesState.recordIndex = recordIndex
         guard let record = seriesState.currentRecord else { return }
         await runTask(message: "Loading frame…") {
-            let loadedImage = try await Task.detached {
-                try ImageLoaderService().load(path: record.path)
-            }.value
-            self.applyLoadedImage(path: record.path, image: loadedImage)
+            let (loadedImage, companion) = try await self.loadImageWithOptionalCompanion(path: record.path)
+            if let companion {
+                self.applyLoadedSession(companion)
+            } else {
+                self.applyLoadedImage(path: record.path, image: loadedImage)
+            }
             self.statusMessage = record.label
         }
     }
@@ -396,55 +411,12 @@ final class MainViewModel {
         displayParams.grayHigh = sorted[min(sorted.count - 1, highIndex)]
     }
 
-    func saveSeg() async {
+    func saveResults() async {
         guard session.imagePath != nil, session.masks != nil else { return }
         await runTask(message: "Saving…") {
             let savePath = self.sessionStore.defaultPath(imagePath: self.session.imagePath!)
             try self.sessionStore.save(path: savePath, session: self.session)
             self.statusMessage = "Saved \(URL(fileURLWithPath: savePath).lastPathComponent)"
-        }
-    }
-
-    func exportMasks() async {
-        await exportWithPanel(defaultName: "_cp_masks.png", types: [.png, .tiff]) { path in
-            guard let masks = self.session.masks else {
-                throw SidecarError.serverError("No masks to export")
-            }
-            let format = path.lowercased().contains("tif") ? "tif" : "png"
-            try self.exportService.exportMasks(masks: masks, path: path, format: format)
-            return path
-        }
-    }
-
-    func loadMasksPanel() async {
-        guard let url = pickFile(allowedTypes: ["tif", "tiff", "png"]) else { return }
-        statusMessage = "Load masks not yet wired for \(url.lastPathComponent)"
-    }
-
-    func exportOutlines() async {
-        await exportWithPanel(defaultName: "_outline.txt", types: [.plainText]) { path in
-            guard let masks = self.session.masks else {
-                throw SidecarError.serverError("No masks to export")
-            }
-            try self.exportService.exportOutlines(masks: masks, path: path)
-            return path
-        }
-    }
-
-    func exportFlows() async {
-        await exportWithPanel(defaultName: "_flows.tif", types: [.tiff]) { path in
-            try self.exportService.exportFlows(flows: self.session.flows, pathBase: path)
-            return path
-        }
-    }
-
-    func exportROIs() async {
-        await exportWithPanel(defaultName: "_rois.zip", types: [.zip]) { path in
-            guard let masks = self.session.masks else {
-                throw SidecarError.serverError("No masks to export")
-            }
-            try self.exportService.exportROIs(masks: masks, path: path)
-            return path
         }
     }
 
@@ -464,22 +436,6 @@ final class MainViewModel {
             await self.refreshModels()
             self.selectedModelIndex = 0
             self.statusMessage = "Removed model \(name)"
-        }
-    }
-
-    private func exportWithPanel(
-        defaultName: String,
-        types: [UTType],
-        export: @escaping (String) throws -> String
-    ) async {
-        guard let filename else { return }
-        let panel = NSSavePanel()
-        panel.nameFieldStringValue = URL(fileURLWithPath: filename).deletingPathExtension().lastPathComponent + defaultName
-        panel.allowedContentTypes = types
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        await runTask(message: "Exporting…") {
-            let path = try export(url.path)
-            self.statusMessage = "Exported \(URL(fileURLWithPath: path).lastPathComponent)"
         }
     }
 

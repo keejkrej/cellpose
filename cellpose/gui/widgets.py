@@ -314,12 +314,10 @@ class ImageDraw(pg.ImageItem):
                 list(self.parent.current_stroke[ioutline])
             )
             self.parent.current_stroke = []
-            if self.parent.autosave_enabled():
-                self.parent.add_set()
+            self.parent.add_set()
         if (
             len(self.parent.current_point_set)
             and len(self.parent.current_point_set[0]) > 0
-            and self.parent.autosave_enabled()
         ):
             self.parent.add_set()
         self.parent.in_stroke = False

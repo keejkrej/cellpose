@@ -11,20 +11,10 @@
     <Grid RowDefinitions="Auto,*">
         <MenuBar Grid.Row="0">
             <MenuBarItem Title="File">
-                <MenuFlyoutItem x:Name="LoadImageItem" Text="Load image (*.tif, *.png, *.jpg)" />
-                <MenuFlyoutItem x:Name="LoadFolderItem" Text="Load folder with pattern..." />
-                <MenuFlyoutSubItem Text="Options">
-                    <ToggleMenuFlyoutItem x:Name="AutoloadMasksItem" Text="Autoload masks from _masks.tif file" />
-                    <ToggleMenuFlyoutItem x:Name="DisableAutosaveItem" Text="Disable autosave _seg.cellpose file" />
-                </MenuFlyoutSubItem>
-                <MenuFlyoutItem x:Name="LoadMasksItem" Text="Load masks (*.tif, *.png, *.jpg)" />
-                <MenuFlyoutItem x:Name="LoadSegItem" Text="Load processed/labelled image (*_seg.cellpose)" />
+                <MenuFlyoutItem x:Name="LoadImageItem" Text="Load image" />
+                <MenuFlyoutItem x:Name="LoadFolderItem" Text="Load folder" />
                 <MenuFlyoutSeparator />
-                <MenuFlyoutItem x:Name="SaveSegItem" Text="Save masks and image (as *_seg.cellpose)" />
-                <MenuFlyoutItem x:Name="ExportMasksItem" Text="Save masks as PNG/tif" />
-                <MenuFlyoutItem x:Name="ExportOutlinesItem" Text="Save outlines as text for ImageJ" />
-                <MenuFlyoutItem x:Name="ExportROIsItem" Text="Save outlines as .zip archive of ROI files for ImageJ" />
-                <MenuFlyoutItem x:Name="ExportFlowsItem" Text="Save flows and cellprob as tif" />
+                <MenuFlyoutItem x:Name="SaveResultsItem" Text="Save results" />
             </MenuBarItem>
             <MenuBarItem Title="Edit">
                 <MenuFlyoutItem x:Name="UndoItem" Text="Undo previous mask/trace" IsEnabled="False" />

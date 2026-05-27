@@ -27,7 +27,6 @@
 		A10000000000000000000012 /* CellposeSessionStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000015 /* CellposeSessionStore.swift */; };
 		A10000000000000000000013 /* MaskEditService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000016 /* MaskEditService.swift */; };
 		A10000000000000000000014 /* SeriesDiscoveryService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000017 /* SeriesDiscoveryService.swift */; };
-		A10000000000000000000015 /* ExportService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000018 /* ExportService.swift */; };
 		A10000000000000000000016 /* ZipArchiveHelper.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000019 /* ZipArchiveHelper.swift */; };
 		A10000000000000000000017 /* SessionState.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000020 /* SessionState.swift */; };
 /* End PBXBuildFile section */
@@ -56,7 +55,6 @@
 		A20000000000000000000015 /* CellposeSessionStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CellposeSessionStore.swift; sourceTree = "<group>"; };
 		A20000000000000000000016 /* MaskEditService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MaskEditService.swift; sourceTree = "<group>"; };
 		A20000000000000000000017 /* SeriesDiscoveryService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SeriesDiscoveryService.swift; sourceTree = "<group>"; };
-		A20000000000000000000018 /* ExportService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExportService.swift; sourceTree = "<group>"; };
 		A20000000000000000000019 /* ZipArchiveHelper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ZipArchiveHelper.swift; sourceTree = "<group>"; };
 		A20000000000000000000020 /* SessionState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionState.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -141,7 +139,6 @@
 				A20000000000000000000015 /* CellposeSessionStore.swift */,
 				A20000000000000000000016 /* MaskEditService.swift */,
 				A20000000000000000000017 /* SeriesDiscoveryService.swift */,
-				A20000000000000000000018 /* ExportService.swift */,
 				A20000000000000000000019 /* ZipArchiveHelper.swift */,
 			);
 			path = Services;
@@ -264,7 +261,6 @@
 				A10000000000000000000012 /* CellposeSessionStore.swift in Sources */,
 				A10000000000000000000013 /* MaskEditService.swift in Sources */,
 				A10000000000000000000014 /* SeriesDiscoveryService.swift in Sources */,
-				A10000000000000000000015 /* ExportService.swift in Sources */,
 				A10000000000000000000016 /* ZipArchiveHelper.swift in Sources */,
 				A10000000000000000000017 /* SessionState.swift in Sources */,
 			);

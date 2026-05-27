@@ -113,12 +113,6 @@ class SaveSegRequest(BaseModel):
     path: str | None = None
 
 
-class ExportMasksRequest(BaseModel):
-    session_id: str
-    path: str
-    format: str = "png"
-
-
 class SeriesDiscoverRequest(BaseModel):
     folder: str
     subfolder_template: str = ""
