@@ -29,10 +29,16 @@ public sealed class ImageCanvasControl : Grid
     private bool _isPanning;
     private Point _panStart;
     private Point _panOffsetStart;
+    private Point _lastPointerPosition;
     private byte[]? _baseLayerPixels;
     private int _baseLayerRevision = -1;
     private int _baseLayerWidth;
     private int _baseLayerHeight;
+    private readonly Canvas _overlayCanvas = new() { IsHitTestVisible = false };
+    private Point? _selectStartImage;
+    private bool _selectDragging;
+    private (int X0, int Y0, int X1, int Y1)? _selectPreviewBounds;
+    private const int SelectDragThreshold = 4;
 
     public ImageCanvasControl()
     {
@@ -41,6 +47,8 @@ public sealed class ImageCanvasControl : Grid
         Background = new SolidColorBrush(Microsoft.UI.Colors.Black);
         Children.Add(_canvas);
         _canvas.Children.Add(_imageControl);
+        _canvas.Children.Add(_overlayCanvas);
+        Canvas.SetZIndex(_overlayCanvas, 1);
         Loaded += (_, _) => UpdateClip();
         SizeChanged += (_, _) =>
         {
@@ -55,8 +63,9 @@ public sealed class ImageCanvasControl : Grid
         PointerPressed += OnPointerPressed;
         PointerMoved += OnPointerMoved;
         PointerReleased += OnPointerReleased;
-        KeyDown += OnKeyDown;
-        IsTabStop = true;
+        PointerEntered += (_, e) => UpdateCursor(e.GetCurrentPoint(this).Position);
+        PointerExited += (_, _) => ProtectedCursor = InputSystemCursor.Create(InputSystemCursorShape.Arrow);
+        ProtectedCursor = InputSystemCursor.Create(InputSystemCursorShape.Arrow);
     }
 
     public MainViewModel? ViewModel
@@ -90,7 +99,17 @@ public sealed class ImageCanvasControl : Grid
         get => _zoom;
         set
         {
-            _zoom = Math.Clamp(value, 0.1, 20);
+            var clamped = Math.Clamp(value, 0.1, 20);
+            if (Math.Abs(clamped - _zoom) < 1e-9)
+                return;
+
+            if (ActualWidth > 0 && ActualHeight > 0)
+            {
+                ZoomAt(new Point(ActualWidth / 2, ActualHeight / 2), clamped / _zoom);
+                return;
+            }
+
+            _zoom = clamped;
             UpdateViewport();
             ZoomChanged?.Invoke(this, _zoom);
         }
@@ -112,6 +131,7 @@ public sealed class ImageCanvasControl : Grid
             nameof(MainViewModel.ShowMasks) or
             nameof(MainViewModel.ShowOutlines) or
             nameof(MainViewModel.SelectedCell) or
+            nameof(MainViewModel.SelectionRevision) or
             nameof(MainViewModel.ViewMode) or
             nameof(MainViewModel.CanvasRevision))
         {
@@ -122,6 +142,12 @@ public sealed class ImageCanvasControl : Grid
 
         if (e.PropertyName is nameof(MainViewModel.StrokeRevision) or nameof(MainViewModel.InStroke))
             Redraw();
+
+        if (e.PropertyName is nameof(MainViewModel.SelectionRevision))
+            UpdateSelectionOverlay();
+
+        if (e.PropertyName is nameof(MainViewModel.BrushMode) or nameof(MainViewModel.SelectMode))
+            UpdateCursor(_lastPointerPosition);
     }
 
     private void Redraw()
@@ -182,6 +208,7 @@ public sealed class ImageCanvasControl : Grid
         _bitmap.Invalidate();
         _imageControl.Source = _bitmap;
         UpdateViewport();
+        UpdateSelectionOverlay();
     }
 
     private byte[] BuildBaseLayerPixels(ImageData image, MainViewModel viewModel)
@@ -245,6 +272,7 @@ public sealed class ImageCanvasControl : Grid
         Canvas.SetLeft(_imageControl, rect.X);
         Canvas.SetTop(_imageControl, rect.Y);
         _imageControl.RenderTransform = null;
+        UpdateSelectionOverlay();
     }
 
     protected override Size ArrangeOverride(Size finalSize)
@@ -280,7 +308,7 @@ public sealed class ImageCanvasControl : Grid
                     viewModel.IsInstanceLabelVisible(fillLabel) &&
                     masks.ColorAt(x, y) is { } fillColor)
                 {
-                    var alpha = fillLabel == viewModel.SelectedCell ? 0.75f : fillColor.Alpha;
+                    var alpha = viewModel.IsCellSelected(fillLabel) ? 0.75f : fillColor.Alpha;
                     BlendPixel(pixels, offset, fillColor.R, fillColor.G, fillColor.B, alpha);
                 }
 
@@ -291,7 +319,7 @@ public sealed class ImageCanvasControl : Grid
                 if (outlineLabel <= 0 || !viewModel.IsInstanceLabelVisible(outlineLabel))
                     continue;
 
-                var outlinePixelAlpha = outlineLabel == viewModel.SelectedCell ? 0.85f : outlineAlpha;
+                var outlinePixelAlpha = viewModel.IsCellSelected(outlineLabel) ? 0.85f : outlineAlpha;
                 BlendPixel(pixels, offset, outlineR, outlineG, outlineB, outlinePixelAlpha);
             }
         }
@@ -416,6 +444,61 @@ public sealed class ImageCanvasControl : Grid
         return Math.Min(ActualWidth / imageWidth, ActualHeight / imageHeight);
     }
 
+    private void ZoomAt(Point screenPoint, double factor)
+    {
+        var image = _viewModel?.Image;
+        if (image == null || ActualWidth <= 0 || ActualHeight <= 0)
+            return;
+
+        var newZoom = Math.Clamp(_zoom * factor, 0.1, 20);
+        if (Math.Abs(newZoom - _zoom) < 1e-9)
+            return;
+
+        var fit = FitScale(image.Width, image.Height);
+        var oldRect = GetImageDrawRect(image.Width, image.Height);
+        var anchor = screenPoint;
+        var u = (anchor.X - oldRect.X) / oldRect.Width;
+        var v = (anchor.Y - oldRect.Y) / oldRect.Height;
+        if (u < 0 || u > 1 || v < 0 || v > 1 || oldRect.Width <= 0 || oldRect.Height <= 0)
+        {
+            anchor = new Point(ActualWidth / 2, ActualHeight / 2);
+            u = (anchor.X - oldRect.X) / oldRect.Width;
+            v = (anchor.Y - oldRect.Y) / oldRect.Height;
+            if (u < 0 || u > 1 || v < 0 || v > 1)
+            {
+                u = 0.5;
+                v = 0.5;
+            }
+        }
+
+        _zoom = newZoom;
+        var newScale = fit * _zoom;
+        var newDrawWidth = image.Width * newScale;
+        var newDrawHeight = image.Height * newScale;
+        _panOffset = new Point(
+            anchor.X - (ActualWidth - newDrawWidth) / 2 - u * newDrawWidth,
+            anchor.Y - (ActualHeight - newDrawHeight) / 2 - v * newDrawHeight);
+        UpdateViewport();
+        ZoomChanged?.Invoke(this, _zoom);
+    }
+
+    private void UpdateCursor(Point position)
+    {
+        if (_isPanning)
+        {
+            ProtectedCursor = InputSystemCursor.Create(InputSystemCursorShape.SizeAll);
+            return;
+        }
+
+        if (_viewModel?.SelectMode == true && ImagePointFromPointer(position) != null)
+        {
+            ProtectedCursor = InputSystemCursor.Create(InputSystemCursorShape.Cross);
+            return;
+        }
+
+        ProtectedCursor = InputSystemCursor.Create(InputSystemCursorShape.Arrow);
+    }
+
     private Point? ImagePointFromPointer(Point location)
     {
         var image = _viewModel?.Image;
@@ -437,7 +520,6 @@ public sealed class ImageCanvasControl : Grid
 
     private void OnPointerPressed(object sender, PointerRoutedEventArgs e)
     {
-        Focus(FocusState.Programmatic);
         var point = e.GetCurrentPoint(this);
 
         if (point.Properties.IsMiddleButtonPressed ||
@@ -446,6 +528,7 @@ public sealed class ImageCanvasControl : Grid
             _isPanning = true;
             _panStart = point.Position;
             _panOffsetStart = _panOffset;
+            UpdateCursor(point.Position);
             CapturePointer(e.Pointer);
             return;
         }
@@ -467,6 +550,16 @@ public sealed class ImageCanvasControl : Grid
             return;
         }
 
+        if (_viewModel.SelectMode && point.Properties.IsLeftButtonPressed)
+        {
+            _selectStartImage = imagePoint;
+            _selectDragging = false;
+            _selectPreviewBounds = null;
+            UpdateSelectionOverlay();
+            CapturePointer(e.Pointer);
+            return;
+        }
+
         var controlDown = InputKeyboardSource.GetKeyStateForCurrentThread(VirtualKey.Control).HasFlag(Windows.UI.Core.CoreVirtualKeyStates.Down);
         var altDown = InputKeyboardSource.GetKeyStateForCurrentThread(VirtualKey.Menu).HasFlag(Windows.UI.Core.CoreVirtualKeyStates.Down);
 
@@ -477,6 +570,8 @@ public sealed class ImageCanvasControl : Grid
     private void OnPointerMoved(object sender, PointerRoutedEventArgs e)
     {
         var point = e.GetCurrentPoint(this);
+        _lastPointerPosition = point.Position;
+        UpdateCursor(point.Position);
 
         if (_isPanning)
         {
@@ -491,6 +586,28 @@ public sealed class ImageCanvasControl : Grid
             ImagePointFromPointer(point.Position) is Point hoverPoint)
         {
             _viewModel.ContinueStroke((int)hoverPoint.X, (int)hoverPoint.Y);
+            return;
+        }
+
+        if (_viewModel?.SelectMode == true &&
+            _selectStartImage is Point start &&
+            point.Properties.IsLeftButtonPressed &&
+            ImagePointFromPointer(point.Position) is Point current)
+        {
+            if (!_selectDragging)
+            {
+                if (Math.Max(Math.Abs(current.X - start.X), Math.Abs(current.Y - start.Y)) < SelectDragThreshold)
+                    return;
+
+                _selectDragging = true;
+            }
+
+            _selectPreviewBounds = (
+                (int)Math.Min(start.X, current.X),
+                (int)Math.Min(start.Y, current.Y),
+                (int)Math.Max(start.X, current.X),
+                (int)Math.Max(start.Y, current.Y));
+            UpdateSelectionOverlay();
         }
     }
 
@@ -499,6 +616,28 @@ public sealed class ImageCanvasControl : Grid
         if (_isPanning)
         {
             _isPanning = false;
+            UpdateCursor(e.GetCurrentPoint(this).Position);
+            ReleasePointerCapture(e.Pointer);
+            return;
+        }
+
+        if (_viewModel?.SelectMode == true && _selectStartImage is Point start)
+        {
+            var shiftDown = InputKeyboardSource.GetKeyStateForCurrentThread(VirtualKey.Shift)
+                .HasFlag(Windows.UI.Core.CoreVirtualKeyStates.Down);
+            if (_selectDragging && _selectPreviewBounds is { } bounds)
+            {
+                _viewModel.SelectCellsInRect(bounds.X0, bounds.Y0, bounds.X1, bounds.Y1, shiftDown);
+            }
+            else if (ImagePointFromPointer(e.GetCurrentPoint(this).Position) is Point end)
+            {
+                _viewModel.SelectCellAt((int)end.X, (int)end.Y, shiftDown);
+            }
+
+            _selectStartImage = null;
+            _selectDragging = false;
+            _selectPreviewBounds = null;
+            UpdateSelectionOverlay();
             ReleasePointerCapture(e.Pointer);
             return;
         }
@@ -506,43 +645,70 @@ public sealed class ImageCanvasControl : Grid
         ReleasePointerCapture(e.Pointer);
     }
 
-    private void OnPointerWheelChanged(object sender, PointerRoutedEventArgs e)
+    private void UpdateSelectionOverlay()
     {
-        var delta = e.GetCurrentPoint(this).Properties.MouseWheelDelta;
-        Zoom = delta > 0 ? Zoom * 1.1 : Zoom / 1.1;
-        e.Handled = true;
-    }
-
-    private async void OnKeyDown(object sender, KeyRoutedEventArgs e)
-    {
-        if (_viewModel == null)
+        _overlayCanvas.Children.Clear();
+        var image = _viewModel?.Image;
+        var masks = _viewModel?.Masks;
+        if (image == null || masks == null || ActualWidth <= 0 || ActualHeight <= 0)
             return;
 
-        switch (e.Key)
+        var rect = GetImageDrawRect(image.Width, image.Height);
+        _overlayCanvas.Width = rect.Width;
+        _overlayCanvas.Height = rect.Height;
+        Canvas.SetLeft(_overlayCanvas, rect.X);
+        Canvas.SetTop(_overlayCanvas, rect.Y);
+
+        if (_selectPreviewBounds is { } preview)
+            AddOverlayRect(preview.X0, preview.Y0, preview.X1, preview.Y1, image.Width, image.Height, 0, 255, 255);
+
+        foreach (var label in _viewModel!.SelectedCellIndices())
         {
-            case VirtualKey.Left:
-            case VirtualKey.A:
-                await _viewModel.NavigateSeriesAsync(-1);
-                break;
-            case VirtualKey.Right:
-            case VirtualKey.D:
-                await _viewModel.NavigateSeriesAsync(1);
-                break;
-            case VirtualKey.PageUp:
-                _viewModel.CycleViewMode(forward: false);
-                break;
-            case VirtualKey.PageDown:
-                _viewModel.CycleViewMode(forward: true);
-                break;
-            case VirtualKey.Add:
-            case (VirtualKey)187:
-                Zoom *= 1.1;
-                break;
-            case VirtualKey.Subtract:
-            case (VirtualKey)189:
-                Zoom /= 1.1;
-                break;
+            if (MaskEditService.CellBounds(masks.Labels, masks.Width, masks.Height, label) is not { } bounds)
+                continue;
+            AddOverlayRect(bounds.X0, bounds.Y0, bounds.X1, bounds.Y1, image.Width, image.Height, 255, 255, 0);
         }
+    }
+
+    private void AddOverlayRect(
+        int x0,
+        int y0,
+        int x1,
+        int y1,
+        int imageWidth,
+        int imageHeight,
+        byte r,
+        byte g,
+        byte b)
+    {
+        if (_overlayCanvas.Width <= 0 || _overlayCanvas.Height <= 0)
+            return;
+
+        var left = (double)x0 / imageWidth * _overlayCanvas.Width;
+        var top = (double)y0 / imageHeight * _overlayCanvas.Height;
+        var right = (double)(x1 + 1) / imageWidth * _overlayCanvas.Width;
+        var bottom = (double)(y1 + 1) / imageHeight * _overlayCanvas.Height;
+        var rectangle = new Microsoft.UI.Xaml.Shapes.Rectangle
+        {
+            Width = Math.Max(1, right - left),
+            Height = Math.Max(1, bottom - top),
+            Stroke = new SolidColorBrush(Windows.UI.Color.FromArgb(255, r, g, b)),
+            StrokeThickness = 2,
+            StrokeDashArray = new DoubleCollection { 4, 3 },
+            Fill = null,
+        };
+        Canvas.SetLeft(rectangle, left);
+        Canvas.SetTop(rectangle, top);
+        _overlayCanvas.Children.Add(rectangle);
+    }
+
+    private void OnPointerWheelChanged(object sender, PointerRoutedEventArgs e)
+    {
+        var point = e.GetCurrentPoint(this);
+        var delta = point.Properties.MouseWheelDelta;
+        var factor = delta > 0 ? 1.1 : 1.0 / 1.1;
+        ZoomAt(point.Position, factor);
+        e.Handled = true;
     }
 
     private void OnDragOver(object sender, DragEventArgs e)

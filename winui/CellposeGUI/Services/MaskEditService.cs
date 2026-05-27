@@ -356,4 +356,98 @@ public static class MaskEditService
         public int X { get; } = x;
         public int Y { get; } = y;
     }
+
+    public static (int X0, int Y0, int X1, int Y1)? CellBounds(
+        int[] labels,
+        int width,
+        int height,
+        int label,
+        int margin = 1)
+    {
+        if (label <= 0)
+            return null;
+
+        var minY = height;
+        var minX = width;
+        var maxY = -1;
+        var maxX = -1;
+        for (var y = 0; y < height; y++)
+        {
+            for (var x = 0; x < width; x++)
+            {
+                if (labels[y * width + x] != label)
+                    continue;
+                minY = Math.Min(minY, y);
+                minX = Math.Min(minX, x);
+                maxY = Math.Max(maxY, y);
+                maxX = Math.Max(maxX, x);
+            }
+        }
+
+        if (maxY < 0)
+            return null;
+
+        return (
+            Math.Max(0, minX - margin),
+            Math.Max(0, minY - margin),
+            Math.Min(width - 1, maxX + margin),
+            Math.Min(height - 1, maxY + margin));
+    }
+
+    public static List<int> CellsFullyInRect(
+        int[] labels,
+        int width,
+        int height,
+        int x0,
+        int y0,
+        int x1,
+        int y1,
+        int? filterClassId = null,
+        IReadOnlyList<int>? classIds = null)
+    {
+        x0 = Math.Clamp(Math.Min(x0, x1), 0, width - 1);
+        x1 = Math.Clamp(Math.Max(x0, x1), 0, width);
+        y0 = Math.Clamp(Math.Min(y0, y1), 0, height - 1);
+        y1 = Math.Clamp(Math.Max(y0, y1), 0, height);
+        if (x1 <= x0 || y1 <= y0)
+            return [];
+
+        var candidates = new HashSet<int>();
+        for (var y = y0; y < y1; y++)
+        {
+            for (var x = x0; x < x1; x++)
+            {
+                var label = labels[y * width + x];
+                if (label > 0)
+                    candidates.Add(label);
+            }
+        }
+
+        var fullyCovered = new List<int>();
+        foreach (var label in candidates.OrderBy(v => v))
+        {
+            for (var y = 0; y < height; y++)
+            {
+                for (var x = 0; x < width; x++)
+                {
+                    if (labels[y * width + x] != label)
+                        continue;
+                    if (y < y0 || y >= y1 || x < x0 || x >= x1)
+                        goto nextCandidate;
+                }
+            }
+
+            if (filterClassId != null && classIds != null)
+            {
+                var row = label - 1;
+                if (row < 0 || row >= classIds.Count || classIds[row] != filterClassId.Value)
+                    goto nextCandidate;
+            }
+
+            fullyCovered.Add(label);
+            nextCandidate: ;
+        }
+
+        return fullyCovered;
+    }
 }

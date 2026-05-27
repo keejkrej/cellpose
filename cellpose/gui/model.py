@@ -320,6 +320,7 @@ class SelectionState:
 class DrawingState:
     strokes: list[Any] = field(default_factory=list)
     current_point_set: list[Any] = field(default_factory=list)
+    current_stroke: list[Any] = field(default_factory=list)
     in_stroke: bool = False
     stroke_appended: bool = True
     brush_mode: bool = False
@@ -327,6 +328,7 @@ class DrawingState:
     def reset(self) -> None:
         self.strokes = []
         self.current_point_set = []
+        self.current_stroke = []
         self.in_stroke = False
         self.stroke_appended = True
         self.brush_mode = False

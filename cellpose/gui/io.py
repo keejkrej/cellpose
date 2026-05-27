@@ -134,46 +134,18 @@ def _get_train_set(image_names):
 
 
 def _clear_series_state(parent):
-    if hasattr(parent, "presenter"):
-        parent.presenter.reset_series()
-    else:
-        parent.series_dataset = None
-        parent.series_index = None
-        parent.output_filename = None
-        parent.display_filename = None
-    if hasattr(parent, "set_series_navigation_state"):
-        parent.set_series_navigation_state()
+    parent.presenter.reset_series()
 
 
 def _set_series_state(parent, dataset=None, item_index=None):
     if dataset is None or item_index is None:
-        if hasattr(parent, "presenter"):
-            parent.presenter.reset_series()
-        else:
-            parent.series_dataset = None
-            parent.series_index = None
-            parent.output_filename = None
-        if hasattr(parent, "set_series_navigation_state"):
-            parent.set_series_navigation_state()
+        parent.presenter.reset_series()
         return
-
-    if hasattr(parent, "presenter"):
-        parent.presenter.set_series(dataset=dataset, record_index=item_index)
-    else:
-        item = dataset["records"][item_index]
-        parent.series_dataset = dataset
-        parent.series_index = item_index
-        parent.output_filename = series.get_output_filename(dataset, item_index)
-        parent.display_filename = item["label"]
-        parent.filename = item["path"]
-    if hasattr(parent, "set_series_navigation_state"):
-        parent.set_series_navigation_state(dataset, item_index)
+    parent.presenter.set_series(dataset=dataset, record_index=item_index)
 
 
 def _get_output_filename(parent):
-    if hasattr(parent, "presenter"):
-        return parent.presenter.output_filename(parent.filename)
-    return parent.output_filename if getattr(parent, "output_filename", None) else parent.filename
+    return parent.presenter.output_filename(str(parent.model.filename))
 
 
 def _prompt_series_templates(parent, folder):
@@ -247,21 +219,20 @@ def _load_series_item(parent, dataset, item_index, load_seg=True, load_3D=False)
     seg_filename = os.path.splitext(output_filename)[0] + "_seg.cellpose"
     if load_seg and os.path.isfile(seg_filename):
         _load_seg(parent, filename=seg_filename, load_3D=load_3D)
-        if getattr(parent, "series_dataset", None) is None:
+        if parent.model.series_state.dataset is None:
             _set_series_state(parent, dataset=dataset, item_index=item_index)
-        parent.setWindowTitle(parent.display_filename or parent.filename)
+        title = parent.model.series_state.display_filename or parent.model.filename
+        parent.set_window_title(str(title))
         return
 
     _load_image(parent, filename=output_filename, load_seg=False, load_3D=load_3D)
     _set_series_state(parent, dataset=dataset, item_index=item_index)
-    parent.setWindowTitle(parent.display_filename or parent.filename)
+    title = parent.model.series_state.display_filename or parent.model.filename
+    parent.set_window_title(str(title))
 
 
 def _load_image(parent, filename=None, load_seg=True, load_3D=False):
-    """ load image with filename; if None, open QFileDialog
-    if image is grey change view to default to grey scale 
-    """
-
+    """Load image with filename; if None, open QFileDialog."""
     if parent.load_3D:
         load_3D = True
 
@@ -274,8 +245,7 @@ def _load_image(parent, filename=None, load_seg=True, load_3D=False):
     manual_file = os.path.splitext(filename)[0] + "_seg.cellpose"
     if load_seg and os.path.isfile(manual_file):
         image = imread_2D(filename) if not load_3D else imread_3D(filename)
-        _load_seg(parent, manual_file, image=image, image_file=filename,
-                  load_3D=load_3D)
+        _load_seg(parent, manual_file, image=image, image_file=filename, load_3D=load_3D)
         return
     try:
         print(f"GUI_INFO: loading image: {filename}")
@@ -283,99 +253,18 @@ def _load_image(parent, filename=None, load_seg=True, load_3D=False):
             image = imread_2D(filename)
         else:
             image = imread_3D(filename)
-        parent.loaded = True
     except Exception as e:
         print("ERROR: images not compatible")
         print(f"ERROR: {e}")
         return
 
-    if parent.loaded:
-        parent.reset()
-        parent.filename = filename
-        parent.display_filename = filename
-        parent.output_filename = None
-        filename = os.path.split(parent.filename)[-1]
-        _initialize_images(parent, image, load_3D=load_3D)
-        parent.loaded = True
-        parent.enable_buttons()
+    parent.presenter.reset_session()
+    parent.presenter.on_initialize_images(image, load_3d=load_3D)
+    parent.presenter.on_image_loaded(filename)
 
 
 def _initialize_images(parent, image, load_3D=False):
-    """ format image for GUI
-
-    assumes image is Z x W x H x C
-
-    """
-    load_3D = parent.load_3D if load_3D is False else load_3D
-
-    if hasattr(parent, "model"):
-        parent.model.load_image_stack(image, load_3d=load_3D)
-        parent.imask = 0
-        if load_3D:
-            parent.scroll.setMaximum(parent.model.session.nz - 1)
-            parent.scroll.setValue(parent.model.session.current_z)
-            parent.zpos.setText(str(parent.model.session.current_z))
-        parent.clear_all()
-        parent.sliders[0].setValue([0, 255])
-        if not hasattr(parent, "stack_filtered") and parent.restore:
-            print("GUI_INFO: no 'img_restore' found, applying current settings")
-            parent.compute_restore()
-        parent.compute_scale()
-        del image
-        gc.collect()
-        return
-
-    parent.stack = image
-    print(f"GUI_INFO: image shape: {image.shape}")
-    if load_3D:
-        parent.NZ = len(parent.stack)
-        parent.scroll.setMaximum(parent.NZ - 1)
-    else:
-        parent.NZ = 1
-        parent.stack = parent.stack[np.newaxis, ...]
-
-    img_min = image.min()
-    img_max = image.max()
-    parent.stack = parent.stack.astype(np.float32)
-    parent.stack -= img_min
-    if img_max > img_min + 1e-3:
-        parent.stack /= (img_max - img_min)
-    parent.stack *= 255
-
-    if load_3D:
-        print("GUI_INFO: converted to float and normalized values to 0.0->255.0")
-
-    del image
-    gc.collect()
-
-    parent.imask = 0
-    parent.Ly, parent.Lx = parent.stack.shape[-3:-1]
-    parent.Ly0, parent.Lx0 = parent.stack.shape[-3:-1]
-    parent.layerz = 255 * np.ones((parent.Ly, parent.Lx, 4), "uint8")
-    if hasattr(parent, "stack_filtered"):
-        parent.Lyr, parent.Lxr = parent.stack_filtered.shape[-3:-1]
-    elif parent.restore and "upsample" in parent.restore:
-        parent.Lyr, parent.Lxr = int(parent.Ly * parent.ratio), int(parent.Lx *
-                                                                    parent.ratio)
-    else:
-        parent.Lyr, parent.Lxr = parent.Ly, parent.Lx
-    parent.clear_all()
-    parent.saturation = [[[0, 255] for n in range(parent.NZ)]]
-    parent.sliders[0].setValue([0, 255])
-
-    if not hasattr(parent, "stack_filtered") and parent.restore:
-        print("GUI_INFO: no 'img_restore' found, applying current settings")
-        parent.compute_restore()
-
-    parent.compute_scale()
-    parent.track_changes = []
-
-    if load_3D:
-        parent.currentZ = int(np.floor(parent.NZ / 2))
-        parent.scroll.setValue(parent.currentZ)
-        parent.zpos.setText(str(parent.currentZ))
-    else:
-        parent.currentZ = 0
+    parent.presenter.on_initialize_images(image, load_3d=load_3D)
 
 
 def _apply_cellpose_segmentation_widgets(parent, segmentation) -> None:
@@ -391,6 +280,8 @@ def _apply_cellpose_segmentation_widgets(parent, segmentation) -> None:
     parent.seg_param_root.param("niter").setValue(int(segmentation.niter))
     if segmentation.diameter is not None:
         parent.seg_param_root.param("diameter").setValue(float(segmentation.diameter))
+    if hasattr(parent, "min_size"):
+        parent.min_size = int(segmentation.min_size)
 
 
 def _load_seg(parent, filename, image=None, image_file=None, load_3D=False):
@@ -403,203 +294,87 @@ def _load_seg(parent, filename, image=None, image_file=None, load_3D=False):
     try:
         session_data = read_session(filename)
     except Exception as exc:
-        parent.loaded = False
+        parent.model.session.loaded = False
         print(f"ERROR: not a valid .cellpose session: {exc}")
         return
 
     if image is None:
         image_path = session_data.source_image
         if not os.path.isfile(image_path):
-            parent.loaded = False
+            parent.model.session.loaded = False
             print(f"ERROR: cannot find image file: {image_path}")
             return
         try:
             print(f"GUI_INFO: loading image: {image_path}")
             image = imread_2D(image_path) if not load_3D else imread_3D(image_path)
         except Exception as exc:
-            parent.loaded = False
+            parent.model.session.loaded = False
             print(f"ERROR: cannot load image: {exc}")
             return
-        parent.filename = image_path
+        parent.model.filename = image_path
     else:
-        parent.filename = image_file or session_data.source_image
+        parent.model.filename = image_file or session_data.source_image
 
-    parent.reset()
+    parent.presenter.reset_session()
     _clear_series_state(parent)
-    parent.output_filename = None
-    parent.display_filename = parent.filename
-    parent.restore = None
-    parent.ratio = 1.0
+    parent.model.series_state.output_filename = None
+    parent.model.series_state.display_filename = str(parent.model.filename)
+    parent.model.session.restore = None
+    parent.model.session.ratio = 1.0
 
-    _initialize_images(parent, image, load_3D=load_3D)
+    parent.presenter.on_initialize_images(image, load_3d=load_3D)
 
     masks = np.asarray(session_data.masks)
     if masks.min() == -1:
         masks = masks + 1
-    ncells = int(masks.max())
     colors = session_data.colors
-    if colors is None and ncells > 0:
-        colors = parent.colormap[:ncells, :3]
+    if colors is None and int(masks.max()) > 0:
+        colors = parent.colormap[: int(masks.max()), :3]
 
-    _masks_to_gui(parent, masks, colors=colors)
-    _apply_cellpose_segmentation_widgets(parent, session_data.segmentation)
+    parent.presenter.apply_masks_from_io(masks, colors=colors)
+    parent.apply_segmentation_metadata_widgets(session_data.segmentation)
 
-    parent.ismanual = np.zeros(parent.ncells(), bool)
+    ismanual = np.zeros(parent.presenter.ncells(), bool)
     if (
         session_data.ismanual is not None
-        and len(session_data.ismanual) == parent.ncells()
+        and len(session_data.ismanual) == parent.presenter.ncells()
     ):
-        parent.ismanual = session_data.ismanual
+        ismanual = session_data.ismanual
 
-    if hasattr(parent, "set_instance_classes"):
-        parent.set_instance_classes(session_data.instance_classes)
-
+    flows = None
+    recompute_masks = False
     if session_data.flows:
-        parent.flows = session_data.flows
+        flows = session_data.flows
         try:
-            if parent.flows[0].shape[-3] != masks.shape[-2]:
-                Ly, Lx = masks.shape[-2:]
-                for i in range(len(parent.flows)):
-                    parent.flows[i] = cv2.resize(
-                        parent.flows[i].squeeze(),
-                        (Lx, Ly),
-                        interpolation=cv2.INTER_NEAREST,
-                    )[np.newaxis, ...]
+            if flows[0].shape[-3] != masks.shape[-2]:
+                ly, lx = masks.shape[-2:]
+                resized = []
+                for flow in flows:
+                    resized.append(
+                        cv2.resize(
+                            np.asarray(flow).squeeze(),
+                            (lx, ly),
+                            interpolation=cv2.INTER_NEAREST,
+                        )[np.newaxis, ...]
+                    )
+                flows = resized
         except Exception:
             pass
-        parent.recompute_masks = session_data.recompute_masks
-    else:
-        parent.recompute_masks = False
+        recompute_masks = session_data.recompute_masks
 
-    parent.loaded = True
-    parent.enable_buttons()
-    parent.update_layer()
+    parent.presenter.on_load_seg_session(
+        session_data,
+        ismanual=ismanual,
+        flows=flows,
+        recompute_masks=recompute_masks,
+        instance_classes=session_data.instance_classes,
+    )
     gc.collect()
 
 
 def _masks_to_gui(parent, masks, outlines=None, colors=None):
-    """ masks loaded into GUI """
-    if hasattr(parent, "presenter"):
-        parent.presenter.apply_masks_from_io(masks, outlines=outlines, colors=colors)
-        return
-    # get unique values
-    shape = masks.shape
-    if len(fastremap.unique(masks)) != masks.max() + 1:
-        print("GUI_INFO: renumbering masks")
-        fastremap.renumber(masks, in_place=True)
-        outlines = None
-        masks = masks.reshape(shape)
-    if masks.ndim == 2:
-        outlines = None
-    masks = masks.astype(np.uint16) if masks.max() < 2**16 - 1 else masks.astype(
-        np.uint32)
-    if parent.restore and "upsample" in parent.restore:
-        parent.cellpix_resize = masks.copy()
-        parent.cellpix = parent.cellpix_resize.copy()
-        parent.cellpix_orig = cv2.resize(
-            masks.squeeze(), (parent.Lx0, parent.Ly0),
-            interpolation=cv2.INTER_NEAREST)[np.newaxis, :, :]
-        parent.resize = True
-    else:
-        parent.cellpix = masks
-    if parent.cellpix.ndim == 2:
-        parent.cellpix = parent.cellpix[np.newaxis, :, :]
-        if parent.restore and "upsample" in parent.restore:
-            if parent.cellpix_resize.ndim == 2:
-                parent.cellpix_resize = parent.cellpix_resize[np.newaxis, :, :]
-            if parent.cellpix_orig.ndim == 2:
-                parent.cellpix_orig = parent.cellpix_orig[np.newaxis, :, :]
-
-    print(f"GUI_INFO: {masks.max()} masks found")
-
-    # get outlines
-    if outlines is None:  # parent.outlinesOn
-        parent.outpix = np.zeros_like(parent.cellpix)
-        if parent.restore and "upsample" in parent.restore:
-            parent.outpix_orig = np.zeros_like(parent.cellpix_orig)
-        for z in range(parent.NZ):
-            outlines = masks_to_outlines(parent.cellpix[z])
-            parent.outpix[z] = outlines * parent.cellpix[z]
-            if parent.restore and "upsample" in parent.restore:
-                outlines = masks_to_outlines(parent.cellpix_orig[z])
-                parent.outpix_orig[z] = outlines * parent.cellpix_orig[z]
-            if z % 50 == 0 and parent.NZ > 1:
-                print("GUI_INFO: plane %d outlines processed" % z)
-        if parent.restore and "upsample" in parent.restore:
-            parent.outpix_resize = parent.outpix.copy()
-    else:
-        parent.outpix = outlines
-        if parent.restore and "upsample" in parent.restore:
-            parent.outpix_resize = parent.outpix.copy()
-            parent.outpix_orig = np.zeros_like(parent.cellpix_orig)
-            for z in range(parent.NZ):
-                outlines = masks_to_outlines(parent.cellpix_orig[z])
-                parent.outpix_orig[z] = outlines * parent.cellpix_orig[z]
-                if z % 50 == 0 and parent.NZ > 1:
-                    print("GUI_INFO: plane %d outlines processed" % z)
-
-    if parent.outpix.ndim == 2:
-        parent.outpix = parent.outpix[np.newaxis, :, :]
-        if parent.restore and "upsample" in parent.restore:
-            if parent.outpix_resize.ndim == 2:
-                parent.outpix_resize = parent.outpix_resize[np.newaxis, :, :]
-            if parent.outpix_orig.ndim == 2:
-                parent.outpix_orig = parent.outpix_orig[np.newaxis, :, :]
-
-    ncells = int(parent.cellpix.max())
-    if hasattr(parent, "ncells_counter"):
-        parent.ncells_counter.set(ncells)
-    colors = parent.colormap[:ncells, :3] if colors is None else colors
-    print("GUI_INFO: creating cellcolors and drawing masks")
-    parent.cellcolors = np.concatenate((np.array([[255, 255, 255]]), colors),
-                                       axis=0).astype(np.uint8)
-    if ncells > 0:
-        parent.draw_layer()
-        parent.toggle_mask_ops()
-    parent.ismanual = np.zeros(ncells, bool)
-    parent.zdraw = list(-1 * np.ones(ncells, np.int16))
-    if hasattr(parent, "set_instance_classes"):
-        parent.set_instance_classes()
-
-    if hasattr(parent, "set_instance_visible"):
-        parent.set_instance_visible()
-
-    if hasattr(parent, "stack_filtered"):
-        parent.ViewDropDown.setCurrentIndex(parent.ViewDropDown.count() - 1)
-        print("set denoised/filtered view")
-    else:
-        parent.ViewDropDown.setCurrentIndex(0)
+    parent.presenter.apply_masks_from_io(masks, outlines=outlines, colors=colors)
 
 
 def _save_sets(parent):
-    """Save masks to *_seg.cellpose."""
-    if hasattr(parent, "presenter"):
-        parent.presenter.save_sets()
-        return
-
-    from cellpose.gui.session_format import write_session
-
-    filename = _get_output_filename(parent)
-    base = os.path.splitext(filename)[0]
-    path = base + "_seg.cellpose"
-    segmentation_params = parent.get_segmentation_parameters()
-
-    if hasattr(parent, "model"):
-        model_name = "cpsam"
-        if hasattr(parent, "ModelChooseC"):
-            model_name = parent.ModelChooseC.currentText().lower()
-        session_data = parent.model.to_session_data(
-            source_image=str(parent.filename),
-            model=model_name,
-            segmentation_params=segmentation_params,
-            recompute_masks=bool(getattr(parent, "recompute_masks", False)),
-        )
-    else:
-        print("ERROR: cannot save session without model state")
-        return
-
-    try:
-        written = write_session(path, session_data)
-        print("GUI_INFO: %d ROIs saved to %s" % (parent.ncells(), written))
-    except Exception as e:
-        print(f"ERROR: {e}")
+    parent.presenter.save_sets()

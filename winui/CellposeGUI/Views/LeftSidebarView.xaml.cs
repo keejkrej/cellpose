@@ -94,6 +94,84 @@ public sealed partial class LeftSidebarView : UserControl
             if (_viewModel != null)
                 _viewModel.BrushMode = false;
         };
+
+        SelectButton.Checked += (_, _) =>
+        {
+            if (_viewModel != null)
+                _viewModel.SelectMode = true;
+        };
+
+        SelectButton.Unchecked += (_, _) =>
+        {
+            if (_viewModel != null)
+                _viewModel.SelectMode = false;
+        };
+
+        DeleteSelectedButton.Click += async (_, _) =>
+        {
+            if (_viewModel != null)
+                await _viewModel.DeleteSelectedCellsAsync();
+        };
+
+        EditSelectedButton.Click += async (_, _) => await ShowEditClassDialogAsync();
+    }
+
+    private async Task ShowEditClassDialogAsync()
+    {
+        if (_viewModel == null)
+            return;
+
+        var cells = _viewModel.SelectedCellIndices();
+        if (cells.Count == 0)
+        {
+            var info = new ContentDialog
+            {
+                Title = "Edit class",
+                Content = "Select one or more cells first.",
+                CloseButtonText = "OK",
+                XamlRoot = XamlRoot,
+            };
+            await info.ShowAsync();
+            return;
+        }
+
+        int? initial = null;
+        var classIds = cells
+            .Select(idx => idx - 1)
+            .Where(row => row >= 0 && row < _viewModel.InstanceClasses.Values.Count)
+            .Select(row => _viewModel.InstanceClasses.Values[row])
+            .ToList();
+        if (classIds.Count > 0 && classIds.Distinct().Count() == 1)
+            initial = classIds[0];
+
+        var classBox = new NumberBox
+        {
+            Minimum = 0,
+            SpinButtonPlacementMode = NumberBoxSpinButtonPlacementMode.Inline,
+            Value = initial ?? 0,
+        };
+
+        var dialog = new ContentDialog
+        {
+            Title = "Edit class",
+            Content = new StackPanel
+            {
+                Spacing = 8,
+                Children =
+                {
+                    new TextBlock { Text = "Class ID for selected cell(s):" },
+                    classBox,
+                },
+            },
+            PrimaryButtonText = "OK",
+            CloseButtonText = "Cancel",
+            XamlRoot = XamlRoot,
+        };
+
+        if (await dialog.ShowAsync() != ContentDialogResult.Primary)
+            return;
+
+        _viewModel.ApplyClassToSelectedCells((int)classBox.Value);
     }
 
     private void BuildAxisRows()
@@ -220,6 +298,8 @@ public sealed partial class LeftSidebarView : UserControl
 
         DefaultClassBox.Value = _viewModel.DefaultClassId;
         BrushButton.IsChecked = _viewModel.BrushMode;
+        SelectButton.IsChecked = _viewModel.SelectMode;
+        UpdateLabelToolButtons();
     }
 
     private void SyncGraySliders()
@@ -273,8 +353,21 @@ public sealed partial class LeftSidebarView : UserControl
 
         AutoSaturationButton.IsEnabled = _viewModel.ImageLoaded && !_viewModel.IsBusy;
         BrushButton.IsEnabled = _viewModel.ImageLoaded;
+        SelectButton.IsEnabled = _viewModel.CanUseLabelTools;
+        DeleteSelectedButton.IsEnabled = _viewModel.CanUseLabelTools;
+        EditSelectedButton.IsEnabled = _viewModel.CanUseLabelTools;
         GrayLowSlider.IsEnabled = _viewModel.ImageLoaded;
         GrayHighSlider.IsEnabled = _viewModel.ImageLoaded;
+    }
+
+    private void UpdateLabelToolButtons()
+    {
+        if (_viewModel == null)
+            return;
+
+        SelectButton.IsEnabled = _viewModel.CanUseLabelTools;
+        DeleteSelectedButton.IsEnabled = _viewModel.CanUseLabelTools;
+        EditSelectedButton.IsEnabled = _viewModel.CanUseLabelTools;
     }
 
     private void RefreshViewModeCombo()
@@ -307,6 +400,7 @@ public sealed partial class LeftSidebarView : UserControl
         {
             case nameof(MainViewModel.ImageLoaded):
             case nameof(MainViewModel.IsBusy):
+            case nameof(MainViewModel.Ncells):
                 UpdateControlStates();
                 break;
             case nameof(MainViewModel.ViewMode):
@@ -314,6 +408,11 @@ public sealed partial class LeftSidebarView : UserControl
                 break;
             case nameof(MainViewModel.BrushMode):
                 BrushButton.IsChecked = _viewModel?.BrushMode ?? false;
+                break;
+            case nameof(MainViewModel.SelectMode):
+                SelectButton.IsChecked = _viewModel?.SelectMode ?? false;
+                break;
+            case nameof(MainViewModel.SelectionRevision):
                 break;
         }
     }

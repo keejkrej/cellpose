@@ -44,6 +44,9 @@
             <Expander Header="Drawing" IsExpanded="True" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
                 <StackPanel Spacing="8" HorizontalAlignment="Stretch">
                     <ToggleButton x:Name="BrushButton" Content="brush" HorizontalAlignment="Left" />
+                    <ToggleButton x:Name="SelectButton" Content="select" HorizontalAlignment="Left" />
+                    <Button x:Name="DeleteSelectedButton" Content="delete" HorizontalAlignment="Left" />
+                    <Button x:Name="EditSelectedButton" Content="edit" HorizontalAlignment="Left" />
                     <NumberBox x:Name="DefaultClassBox" Header="default class" HorizontalAlignment="Stretch" SpinButtonPlacementMode="Inline" />
                 </StackPanel>
             </Expander>

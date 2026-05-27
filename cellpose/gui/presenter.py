@@ -6,6 +6,8 @@ MainPresenter connects MainView (widgets + rendering) to MainModel (state).
 
 from __future__ import annotations
 
+import copy
+import datetime
 import os
 import time
 from typing import Any
@@ -14,21 +16,28 @@ import cv2
 import numpy as np
 from PySide6.QtWidgets import QMessageBox
 
-from .. import dynamics
+from .. import dynamics, models, train
+from ..io import get_image_files
+from ..models import normalize_default
+from ..plot import disk
 from ..transforms import normalize99, resize_image
 from . import io, series
-from .model import (
-    InstanceClasses,
-    MainModel,
-    SegmentationParameters,
-    SeriesState,
-)
+from .model import InstanceClasses, MainModel, SegmentationParameters, SeriesState
+from .presenter_masks import add_mask_from_points, paint_mask_at
+from .view_protocol import LabelRow, SeriesNavViewState
 
 
 class MainPresenter:
     def __init__(self, view, model: MainModel):
         self.view = view
         self.model = model
+        self.cp_model = None
+        self.current_model = "cpsam"
+        self.current_model_path = None
+
+    @property
+    def session(self):
+        return self.model.session
 
     def training_params(self) -> dict[str, Any]:
         return self.model.training_params
@@ -51,21 +60,35 @@ class MainPresenter:
 
     # ---- series ----
 
+    def _series_nav_state(
+        self, dataset=None, record_index=None
+    ) -> SeriesNavViewState:
+        if dataset is None or record_index is None:
+            return SeriesNavViewState(enabled=False, axis_ranges={}, axis_values={})
+        axis_ranges = {}
+        axis_values = {}
+        for axis_name in series.SERIES_AXES:
+            axis_values_list = dataset["axes"][axis_name]
+            axis_ranges[axis_name] = (0, max(0, len(axis_values_list) - 1))
+            axis_values[axis_name] = dataset["axis_index"][axis_name][
+                dataset["records"][record_index][axis_name]
+            ]
+        return SeriesNavViewState(
+            enabled=True, axis_ranges=axis_ranges, axis_values=axis_values
+        )
+
     def reset_series(self) -> SeriesState:
         state = self.model.reset_series()
-        self.view.sync_series_state(state)
-        self.view.set_series_navigation_state()
+        self.view.apply_series_labels(state)
+        self.view.set_series_navigation(self._series_nav_state())
         return state
 
     def set_series(
         self, dataset: dict[str, Any] | None = None, record_index: int | None = None
     ) -> SeriesState:
         state = self.model.set_series(dataset=dataset, record_index=record_index)
-        self.view.sync_series_state(state)
-        if dataset is not None and record_index is not None:
-            self.view.set_series_navigation_state(dataset, record_index)
-        else:
-            self.view.set_series_navigation_state()
+        self.view.apply_series_labels(state)
+        self.view.set_series_navigation(self._series_nav_state(dataset, record_index))
         return state
 
     def output_filename(self, fallback_filename: str) -> str:
@@ -89,59 +112,74 @@ class MainPresenter:
     def segmentation_parameters_dict(self) -> dict[str, Any]:
         return self.segmentation_parameters().to_dict()
 
+    def get_normalize_params(self) -> dict[str, Any]:
+        segmentation_params = self.segmentation_parameters_dict()
+        stored = dict(self.model.preprocessing_params or {})
+        params = {**normalize_default, **stored}
+        params["percentile"] = segmentation_params["percentile"]
+        return params
+
+    def set_normalize_params(self, normalize_params: dict[str, Any]) -> None:
+        merged = {**normalize_default, **normalize_params}
+        if self.session.restore != "filter":
+            for key in merged:
+                if key != "percentile":
+                    merged[key] = normalize_default[key]
+        self.model.preprocessing_params = merged
+
     # ---- instances ----
+
+    def ncells(self) -> int:
+        return self.model.ncells
 
     def ensure_instance_classes(
         self, ncells: int | None = None, current_values: np.ndarray | None = None
     ) -> np.ndarray:
         if ncells is None:
-            ncells = self.view.ncells()
+            ncells = self.ncells()
         return self.model.ensure_instance_classes(ncells, current_values=current_values)
 
     def set_instance_classes(
         self, values: np.ndarray | list[int] | None = None, ncells: int | None = None
     ) -> np.ndarray:
         if ncells is None:
-            ncells = self.view.ncells()
+            ncells = self.ncells()
         result = self.model.set_instance_classes(ncells, values)
-        self.view.refresh_instance_table()
+        self.refresh_labels_table()
         return result
 
     def set_instance_class(self, row: int, class_id: int) -> np.ndarray:
         result = self.model.set_instance_class(row, class_id)
-        self.view.refresh_instance_table()
-        self.view.draw_layer()
-        self.view.update_layer()
+        self.refresh_labels_table()
+        self.refresh_mask_layer()
         return result
 
     def ensure_instance_visible(
         self, ncells: int | None = None, current_values: np.ndarray | None = None
     ) -> np.ndarray:
         if ncells is None:
-            ncells = self.view.ncells()
+            ncells = self.ncells()
         return self.model.ensure_instance_visible(ncells, current_values=current_values)
 
     def set_instance_visible(
         self, values: np.ndarray | list[bool] | None = None, ncells: int | None = None
     ) -> np.ndarray:
         if ncells is None:
-            ncells = self.view.ncells()
+            ncells = self.ncells()
         result = self.model.set_instance_visible(ncells, values)
-        self.view.refresh_instance_table()
+        self.refresh_labels_table()
         return result
 
     def set_instance_visible_row(self, row: int, visible: bool) -> np.ndarray:
         result = self.model.set_instance_visible_row(row, visible)
-        self.view.draw_layer()
-        self.view.update_layer()
+        self.refresh_mask_layer()
         return result
 
     def set_all_instance_visible(self, visible: bool, ncells: int | None = None) -> None:
         if ncells is None:
-            ncells = self.view.ncells()
+            ncells = self.ncells()
         self.model.set_all_instance_visible(visible, ncells)
-        self.view.draw_layer()
-        self.view.update_layer()
+        self.refresh_mask_layer()
 
     def remove_instance_metadata(self, row: int) -> tuple[int, bool]:
         return self.model.remove_instance_metadata(row)
@@ -154,368 +192,670 @@ class MainPresenter:
     def reset_instance_metadata(self) -> None:
         self.model.reset_instance_metadata()
 
-    def instance_class_filter(self) -> int | None:
-        return InstanceClasses.parse_filter(self.view.instance_class_filter_text())
+    def labels_class_filter(self) -> int | None:
+        return InstanceClasses.parse_filter(self.view.read_labels_class_filter())
 
     def visible_cell_pixels(self, cellpix: np.ndarray) -> np.ndarray:
         self.ensure_instance_classes()
         self.ensure_instance_visible()
-        return self.model.visible_cell_pixels(cellpix, self.instance_class_filter())
+        return self.model.visible_cell_pixels(cellpix, self.labels_class_filter())
 
-    def on_instance_filter_changed(self) -> None:
-        self.view.refresh_instance_table()
-        self.view.draw_layer()
-        self.view.update_layer()
+    def build_labels_table_rows(self) -> list[LabelRow]:
+        ncells = self.ncells()
+        self.ensure_instance_classes(ncells)
+        self.ensure_instance_visible(ncells)
+        filter_class_id = self.labels_class_filter()
+        selected = set(self.model.selection.selected_cells)
+        if not selected and self.model.selection.selected > 0:
+            selected = {self.model.selection.selected}
+        rows = []
+        for row in range(ncells):
+            class_id = int(self.instance_classes[row])
+            rows.append(
+                LabelRow(
+                    roi=row + 1,
+                    class_id=class_id,
+                    visible=bool(self.instance_visible[row]),
+                    hidden_by_filter=(
+                        filter_class_id is not None and class_id != filter_class_id
+                    ),
+                    selected=(row + 1) in selected,
+                )
+            )
+        return rows
+
+    def labels_table_header_state(self) -> str:
+        ncells = self.ncells()
+        if ncells == 0:
+            return "unchecked"
+        self.ensure_instance_visible(ncells)
+        visible_count = int(self.instance_visible[:ncells].sum())
+        if visible_count == 0:
+            return "unchecked"
+        if visible_count == ncells:
+            return "checked"
+        return "partial"
+
+    def refresh_labels_table(self) -> None:
+        self.view.refresh_labels_table(
+            self.build_labels_table_rows(),
+            self.labels_table_header_state(),
+        )
+
+    def refresh_mask_layer(self) -> None:
+        session = self.session
+        if session.resize:
+            session.ly, session.lx = session.lyr, session.lxr
+        else:
+            session.ly, session.lx = session.ly0, session.lx0
+        if session.restore and "upsample" in session.restore:
+            if session.resize:
+                session.cellpix = session.cellpix_resize.copy()
+                session.outpix = session.outpix_resize.copy()
+            else:
+                session.cellpix = session.cellpix_orig.copy()
+                session.outpix = session.outpix_orig.copy()
+        layerz = self.model.build_layer_rgba(filter_class_id=self.labels_class_filter())
+        stroke_z = np.array([s[0][0] for s in self.model.drawing.strokes])
+        in_z = np.nonzero(stroke_z == session.current_z)[0]
+        for i in in_z:
+            stroke = np.array(self.model.drawing.strokes[i])
+            layerz[stroke[:, 1], stroke[:, 2]] = np.array([255, 0, 255, 100])
+        self.view.render_mask_overlay(layerz)
+        self.view.show_window()
+
+    def selection_bounds(self) -> list[tuple[int, int, int, int]]:
+        indices = (
+            self.model.selection.selected_cells
+            if self.model.selection.selected_cells
+            else (
+                [self.model.selection.selected]
+                if self.model.selection.selected > 0
+                else []
+            )
+        )
+        bounds = []
+        for idx in indices:
+            rect = self.model.cell_bounds(idx)
+            if rect is not None:
+                bounds.append(rect)
+        return bounds
+
+    def on_labels_filter_changed(self) -> None:
+        self.refresh_labels_table()
+        self.refresh_mask_layer()
+
+    # ---- navigation ----
+
+    def get_files(self) -> tuple[list[str], int]:
+        dataset = self.model.series_state.dataset
+        record_index = self.model.series_state.record_index
+        if dataset is not None and record_index is not None:
+            return (
+                [record["path"] for record in dataset["records"]],
+                record_index,
+            )
+        folder = os.path.dirname(str(self.model.filename))
+        mask_filter = "_masks"
+        images = get_image_files(folder, mask_filter)
+        fnames = [os.path.split(images[k])[-1] for k in range(len(images))]
+        f0 = os.path.split(self.model.filename)[-1]
+        idx = int(np.nonzero(np.array(fnames) == f0)[0][0])
+        return images, idx
 
     def run_selected_model(self) -> None:
-        model_name, custom = self.view._selected_segmentation_model()
+        model_name, custom = self.view.read_selected_model()
         if custom:
             self.compute_segmentation(custom=True)
         else:
             self.compute_segmentation(model_name=model_name)
 
     def get_prev_image(self) -> None:
-        images, idx = self.view.get_files()
+        images, idx = self.get_files()
         idx = (idx - 1) % len(images)
-        if self.view.series_dataset is not None:
+        opts = self.view.read_inference_options()
+        if self.model.series_state.dataset is not None:
             try:
                 io._load_series_item(
-                    self.view, self.view.series_dataset, idx, load_3D=self.view.load_3D
+                    self.view,
+                    self.model.series_state.dataset,
+                    idx,
+                    load_3D=opts["load_3D"],
                 )
             except Exception as e:
                 print(f"ERROR: {e}")
-                QMessageBox.warning(self.view, "Load folder with pattern", str(e))
+                self.view.show_message("Load folder with pattern", str(e))
         else:
             io._load_image(self.view, filename=images[idx])
 
     def get_next_image(self, load_seg: bool = True) -> None:
-        images, idx = self.view.get_files()
+        images, idx = self.get_files()
         idx = (idx + 1) % len(images)
-        if self.view.series_dataset is not None:
+        opts = self.view.read_inference_options()
+        if self.model.series_state.dataset is not None:
             try:
                 io._load_series_item(
                     self.view,
-                    self.view.series_dataset,
+                    self.model.series_state.dataset,
                     idx,
                     load_seg=load_seg,
-                    load_3D=self.view.load_3D,
+                    load_3D=opts["load_3D"],
                 )
             except Exception as e:
                 print(f"ERROR: {e}")
-                QMessageBox.warning(self.view, "Load folder with pattern", str(e))
+                self.view.show_message("Load folder with pattern", str(e))
         else:
             io._load_image(self.view, filename=images[idx], load_seg=load_seg)
 
     def navigate_series_from_sliders(
         self, axis_name: str | None = None, delta: int = 0
     ) -> None:
-        if delta != 0:
-            control = self.view.series_nav_controls.get(axis_name)
-            if control is None:
+        if delta != 0 and axis_name is not None:
+            axes = self.view.read_series_slider_axes()
+            current = axes.get(axis_name, 0)
+            dataset = self.model.series_state.dataset
+            if dataset is None:
                 return
-            slider = control["slider"]
-            if not slider.isEnabled():
-                return
-            value = max(0, min(slider.maximum(), slider.value() + delta))
-            old_updating_state = self.view._updating_series_navigation
-            self.view._updating_series_navigation = True
+            nav = self._series_nav_state(dataset, self.model.series_state.record_index)
+            low, high = nav.axis_ranges.get(axis_name, (0, 0))
+            value = max(low, min(high, current + delta))
+            self.view.set_updating_series_navigation(True)
             try:
-                slider.setValue(value)
+                self.view.set_series_slider_value(axis_name, value)
             finally:
-                self.view._updating_series_navigation = old_updating_state
+                self.view.set_updating_series_navigation(False)
 
         if (
-            self.view._updating_series_navigation
-            or self.view.series_dataset is None
-            or self.view.series_index is None
+            self.view.is_updating_series_navigation()
+            or self.model.series_state.dataset is None
+            or self.model.series_state.record_index is None
+            or axis_name is None
         ):
             return
 
-        if axis_name is None:
-            return
-
+        slider_axes = self.view.read_series_slider_axes()
+        dataset = self.model.series_state.dataset
         try:
             record_index = series.resolve_series_record_index(
-                self.view.series_dataset,
-                position=self.view.series_dataset["axes"]["position"][
-                    self.view.series_nav_controls["position"]["slider"].value()
-                ],
-                time=self.view.series_dataset["axes"]["time"][
-                    self.view.series_nav_controls["time"]["slider"].value()
-                ],
-                channel=self.view.series_dataset["axes"]["channel"][
-                    self.view.series_nav_controls["channel"]["slider"].value()
-                ],
-                z=self.view.series_dataset["axes"]["z"][
-                    self.view.series_nav_controls["z"]["slider"].value()
-                ],
+                dataset,
+                position=dataset["axes"]["position"][slider_axes["position"]],
+                time=dataset["axes"]["time"][slider_axes["time"]],
+                channel=dataset["axes"]["channel"][slider_axes["channel"]],
+                z=dataset["axes"]["z"][slider_axes["z"]],
             )
         except Exception as e:
-            self.view.set_series_navigation_state(
-                self.view.series_dataset, self.view.series_index
+            self.view.set_series_navigation(
+                self._series_nav_state(dataset, self.model.series_state.record_index)
             )
-            QMessageBox.warning(self.view, "Load folder with pattern", str(e))
+            self.view.show_message("Load folder with pattern", str(e))
             return
 
-        if record_index == self.view.series_index:
+        if record_index == self.model.series_state.record_index:
             return
 
+        opts = self.view.read_inference_options()
         try:
             io._load_series_item(
                 self.view,
-                self.view.series_dataset,
+                dataset,
                 record_index,
-                load_3D=self.view.load_3D,
+                load_3D=opts["load_3D"],
             )
         except Exception as e:
-            self.view.set_series_navigation_state(
-                self.view.series_dataset, self.view.series_index
+            self.view.set_series_navigation(
+                self._series_nav_state(dataset, self.model.series_state.record_index)
             )
             print(f"ERROR: {e}")
-            QMessageBox.warning(self.view, "Load folder with pattern", str(e))
+            self.view.show_message("Load folder with pattern", str(e))
+
+    # ---- session lifecycle ----
+
+    def reset_session(self) -> None:
+        self.model.reset_session()
+        self.view.set_ncells_count(0)
+        if hasattr(self.view, "BrushButton"):
+            self.view.BrushButton.setChecked(False)
+        self.view.sliders[0].setValue([0, 255])
+        self.view.sliders[0].setEnabled(False)
+        self.view.set_view_mode(0, restored_enabled=False)
+        self.model.discard_filtered_stack()
+        self.clear_all()
+        self.reset_series()
+        self.view.autoSaturationButton.setEnabled(False)
+
+    def clear_all(self) -> None:
+        self.model.clear_masks()
+        self.view.set_ncells_count(0)
+        self.view.set_mask_action_enabled(False)
+        self.refresh_scale_from_model()
+        self.refresh_mask_layer()
+        self.refresh_labels_table()
+        self.view.render_selection_boxes([])
+        self.view.render_rect_select_preview(None)
+
+    def on_initialize_images(self, image: np.ndarray, load_3d: bool = False) -> None:
+        self.model.load_image_stack(image, load_3d=load_3d)
+        self.clear_all()
+        self.view.sliders[0].setValue([0, 255])
+        self.refresh_scale_from_model()
+
+    def on_image_loaded(self, filename: str, display_filename: str | None = None) -> None:
+        self.model.filename = filename
+        self.model.series_state.display_filename = display_filename or filename
+        self.model.series_state.output_filename = None
+        self.model.session.loaded = True
+        self.view.set_loaded_chrome(True)
+
+    def refresh_scale_from_model(self) -> None:
+        params = self.segmentation_parameters_dict()
+        diameter = params["diameter"] or 30
+        pr = int(diameter)
+        radii_padding = int(pr * 1.25)
+        session = self.session
+        radii = np.zeros((session.ly + radii_padding, session.lx, 4), np.uint8)
+        yy, xx = disk(
+            [session.ly + radii_padding / 2 - 1, pr / 2 + 1],
+            pr / 2,
+            session.ly + radii_padding,
+            session.lx,
+        )
+        radii[yy, xx, 0] = 150
+        radii[yy, xx, 1] = 50
+        radii[yy, xx, 2] = 150
+        radii[yy, xx, 3] = 255
+        self.view.p0.setYRange(0, session.ly + radii_padding)
+        self.view.p0.setXRange(0, session.lx)
+        self.view.radii = radii
+        self.view.render_diameter_scale(radii)
+        self.view.show_window()
+
+    def compute_saturation(self) -> None:
+        params = self.segmentation_parameters_dict()
+        percentile = params["percentile"]
+        restored_view_index = 3
+        if (
+            self.view.read_view_mode_index() == restored_view_index
+            and self.session.stack_filtered is not None
+        ):
+            img_norm = self.session.stack_filtered
+        else:
+            img_norm = self.session.stack
+        from .widgets import as_gray_image
+
+        img_gray = as_gray_image(img_norm)
+        self.session.saturation = [[]]
+        if np.ptp(img_gray) > 1e-3:
+            for z in range(self.session.nz):
+                plane = img_gray[z] if self.session.nz > 1 else img_gray
+                x01 = np.percentile(plane, percentile[0])
+                x99 = np.percentile(plane, percentile[1])
+                self.session.saturation[0].append([x01, x99])
+        else:
+            for _ in range(self.session.nz):
+                self.session.saturation[0].append([0, 255.0])
+        self.view.refresh_plot_from_model()
+
+    # ---- cells / masks ----
 
     def remove_cell(self, idx) -> None:
         if isinstance(idx, (int, np.integer)):
             idx = [idx]
-        idx.sort(reverse=True)
+        idx = sorted({int(i) for i in idx}, reverse=True)
+        selection = self.model.selection
+        selection.selected = 0
+        selection.selected_cells = []
+        if self.session.nz == 1 and len(idx) == 1:
+            i = idx[0]
+            cp = self.session.cellpix[0] == i
+            op = self.session.outpix[0] == i
+            row = i - 1
+            removed_class_id = (
+                int(self.instance_classes[row]) if row < len(self.instance_classes) else 0
+            )
+            removed_visible = (
+                bool(self.instance_visible[row])
+                if row < len(self.instance_visible)
+                else True
+            )
+            selection.removed_cell = [
+                self.session.ismanual[row] if row < len(self.session.ismanual) else False,
+                self.session.cellcolors[i],
+                np.nonzero(cp),
+                np.nonzero(op),
+                removed_class_id,
+                removed_visible,
+            ]
+            self.view.set_redo_enabled(True)
+        self.model.remove_cells(idx)
         for i in idx:
-            self.view.remove_single_cell(i)
-        self.view._sync_ncells_counter()
-        self.view.update_layer()
-
-        if self.view.ncells() == 0:
-            self.view.ClearButton.setEnabled(False)
-        if self.view.NZ == 1:
+            print("GUI_INFO: removed cell %d" % (i - 1))
+        self.view.set_ncells_count(self.ncells())
+        self.refresh_labels_table()
+        self.refresh_mask_layer()
+        if self.ncells() == 0:
+            self.view.set_mask_action_enabled(False)
+        if self.session.nz == 1:
             io._save_sets(self.view)
 
+    def _remove_single_cell(self, idx: int) -> None:
+        self.remove_cell(idx)
+
     def add_set(self) -> None:
-        if len(self.view.current_point_set) > 0:
-            while len(self.view.strokes) > 0:
-                self.view.remove_stroke(delete_points=False)
-            if len(self.view.current_point_set[0]) > 8:
-                color = self.view.colormap[self.view.ncells(), :3]
-                median = self.view.add_mask(
-                    points=self.view.current_point_set, color=color
+        drawing = self.model.drawing
+        if len(drawing.current_point_set) > 0:
+            while len(drawing.strokes) > 0:
+                self.remove_stroke(delete_points=False)
+            if len(drawing.current_point_set[0]) > 8:
+                color = self.view.colormap[self.ncells(), :3]
+                median = add_mask_from_points(
+                    self.model, drawing.current_point_set, color
                 )
                 if median is not None:
-                    self.view.removed_cell = []
-                    self.view.toggle_mask_ops()
-                    self.view.cellcolors = np.append(
-                        self.view.cellcolors, color[np.newaxis, :], axis=0
+                    self.model.selection.removed_cell = []
+                    self.session.cellcolors = np.append(
+                        self.session.cellcolors, color[np.newaxis, :], axis=0
                     )
-                    self.view.ismanual = np.append(self.view.ismanual, True)
-                    self.append_instance_metadata(self.view.default_class_id(), True)
-                    self.view._sync_ncells_counter()
-                    self.view.draw_layer()
-                    if self.view.NZ == 1:
+                    self.session.ismanual = np.append(self.session.ismanual, True)
+                    self.append_instance_metadata(self.view.read_default_class_id(), True)
+                    self.view.set_ncells_count(self.ncells())
+                    self.view.set_mask_action_enabled(True)
+                    self.refresh_labels_table()
+                    self.refresh_mask_layer()
+                    if self.session.nz == 1:
                         io._save_sets(self.view)
             else:
                 print("GUI_ERROR: cell too small, not drawn")
-            self.view.current_stroke = []
-            self.view.strokes = []
-            self.view.current_point_set = []
-            self.view.update_layer()
+            drawing.current_stroke = []
+            drawing.strokes = []
+            drawing.current_point_set = []
+            self.refresh_mask_layer()
+
+    def remove_stroke(self, delete_points=True, stroke_ind=-1) -> None:
+        stroke = np.array(self.model.drawing.strokes[stroke_ind])
+        c_z = self.session.current_z
+        in_z = stroke[0, 0] == c_z
+        if in_z:
+            outpix = self.session.outpix[c_z, stroke[:, 1], stroke[:, 2]] > 0
+            self.session.layerz[stroke[~outpix, 1], stroke[~outpix, 2]] = np.array(
+                [0, 0, 0, 0]
+            )
+            cellpix = self.session.cellpix[c_z, stroke[:, 1], stroke[:, 2]]
+            ccol = self.session.cellcolors.copy()
+            if self.model.selection.selected > 0:
+                ccol[self.model.selection.selected] = np.array([255, 255, 255])
+            col2mask = ccol[cellpix]
+            col2mask = np.concatenate(
+                (col2mask, self.session.opacity * (cellpix[:, np.newaxis] > 0)),
+                axis=-1,
+            )
+            self.session.layerz[stroke[:, 1], stroke[:, 2], :] = col2mask
+            self.session.layerz[stroke[outpix, 1], stroke[outpix, 2]] = np.array(
+                self.session.outcolor
+            )
+            if delete_points:
+                del self.model.drawing.current_point_set[stroke_ind]
+            self.refresh_mask_layer()
+        del self.model.drawing.strokes[stroke_ind]
+
+    def merge_cells(self, idx: int) -> None:
+        selection = self.model.selection
+        selection.prev_selected = selection.selected
+        selection.selected = idx
+        if selection.selected != selection.prev_selected:
+            for z in range(self.session.nz):
+                ar0, ac0 = np.nonzero(
+                    self.session.cellpix[z] == selection.prev_selected
+                )
+                ar1, ac1 = np.nonzero(self.session.cellpix[z] == selection.selected)
+                touching = np.logical_and(
+                    (ar0[:, np.newaxis] - ar1) < 3, (ac0[:, np.newaxis] - ac1) < 3
+                ).sum()
+                vr0, vc0 = np.nonzero(self.session.outpix[z] == selection.prev_selected)
+                vr1, vc1 = np.nonzero(self.session.outpix[z] == selection.selected)
+                self.session.outpix[z, vr0, vc0] = 0
+                self.session.outpix[z, vr1, vc1] = 0
+                if touching > 0:
+                    ar = np.hstack((ar0, ar1))
+                    ac = np.hstack((ac0, ac1))
+                    mask = np.zeros((np.ptp(ar) + 4, np.ptp(ac) + 4), np.uint8)
+                    mask[ar - ar.min() + 2, ac - ac.min() + 2] = 1
+                    contours = cv2.findContours(
+                        mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE
+                    )
+                    pvc, pvr = contours[-2][0].squeeze().T
+                    vr, vc = pvr + ar.min() - 2, pvc + ac.min() - 2
+                else:
+                    vr = np.hstack((vr0, vr1))
+                    vc = np.hstack((vc0, vc1))
+                    ar = np.hstack((ar0, ar1))
+                    ac = np.hstack((ac0, ac1))
+                color = self.session.cellcolors[selection.prev_selected]
+                paint_mask_at(
+                    self.model,
+                    z,
+                    ar,
+                    ac,
+                    vr,
+                    vc,
+                    color,
+                    idx=selection.prev_selected,
+                )
+            self.remove_cell(selection.selected)
+            print("GUI_INFO: merged two cells")
+            self.view.set_undo_enabled(False)
+            self.view.set_redo_enabled(False)
+
+    def undo_remove_cell(self) -> None:
+        selection = self.model.selection
+        if len(selection.removed_cell) > 0:
+            z = 0
+            ar, ac = selection.removed_cell[2]
+            vr, vc = selection.removed_cell[3]
+            color = selection.removed_cell[1]
+            paint_mask_at(self.model, z, ar, ac, vr, vc, color)
+            self.session.cellcolors = np.append(
+                self.session.cellcolors, color[np.newaxis, :], axis=0
+            )
+            self.session.ismanual = np.append(
+                self.session.ismanual, selection.removed_cell[0]
+            )
+            class_id = selection.removed_cell[4] if len(selection.removed_cell) > 4 else 0
+            visible = selection.removed_cell[5] if len(selection.removed_cell) > 5 else True
+            self.append_instance_metadata(class_id, visible)
+            self.view.set_ncells_count(self.ncells())
+            self.session.zdraw.append([])
+            self.view.set_mask_action_enabled(True)
+            self.refresh_mask_layer()
+            io._save_sets(self.view)
+            selection.removed_cell = []
+            self.view.set_redo_enabled(False)
 
     def _apply_masks_to_view(self, masks: np.ndarray) -> None:
         ncells = self.model.apply_masks(
             masks, outlines=None, colormap=self.view.colormap
         )
-        self.view._sync_ncells_counter()
+        self.view.set_ncells_count(ncells)
         print(f"GUI_INFO: {ncells} masks found")
         if ncells > 0:
-            self.view.draw_layer()
-            self.view.toggle_mask_ops()
-        if self.view.restore == "filter" or self.view.stack_filtered is not None:
-            self.view.ViewDropDown.setCurrentIndex(self.view.ViewDropDown.count() - 1)
+            self.refresh_mask_layer()
+            self.view.set_mask_action_enabled(True)
+        restored = (
+            self.session.restore == "filter" or self.session.stack_filtered is not None
+        )
+        self.view.set_view_mode(3 if restored else 0, restored_enabled=restored)
+        if restored:
             print("set denoised/filtered view")
-        else:
-            self.view.ViewDropDown.setCurrentIndex(0)
 
     def compute_cprob(self) -> None:
-        if getattr(self.view, "recompute_masks", False):
-            segmentation_params = self.view.get_segmentation_parameters()
-            min_size = (
-                int(self.view.min_size.text())
-                if not isinstance(self.view.min_size, int)
-                else self.view.min_size
+        if not self.session.recompute_masks:
+            return
+        segmentation_params = self.segmentation_parameters_dict()
+        opts = self.view.read_inference_options()
+        self.view.logger.info(
+            "computing masks with cell prob=%0.3f, flow error threshold=%0.3f"
+            % (
+                segmentation_params["cellprob_threshold"],
+                segmentation_params["flow_threshold"],
             )
+        )
+        try:
+            d_p = self.session.flows[2].squeeze()
+            cellprob = self.session.flows[3].squeeze()
+        except IndexError:
+            self.view.logger.error("Flows don't exist, try running model again.")
+            return
+        maski = dynamics.resize_and_compute_masks(
+            dP=d_p,
+            cellprob=cellprob,
+            niter=segmentation_params["niter"],
+            do_3D=opts["load_3D"],
+            min_size=opts["min_size"],
+            cellprob_threshold=segmentation_params["cellprob_threshold"],
+            flow_threshold=segmentation_params["flow_threshold"],
+        )
+        if maski.ndim < 3:
+            maski = maski[np.newaxis, ...]
+        self.view.logger.info("%d cells found" % (len(np.unique(maski)[1:])))
+        self._apply_masks_to_view(maski)
+        self.view.show_window()
 
-            self.view.logger.info(
-                "computing masks with cell prob=%0.3f, flow error threshold=%0.3f"
-                % (
-                    segmentation_params["cellprob_threshold"],
-                    segmentation_params["flow_threshold"],
+    def initialize_model(self, model_name=None, custom=False) -> None:
+        if model_name is None or custom:
+            model_name, _ = self.view.read_selected_model()
+            self.current_model = model_name
+            self.current_model_path = os.fspath(
+                models.MODEL_DIR.joinpath("custom", self.current_model)
+            )
+            if not os.path.exists(self.current_model_path):
+                raise ValueError(
+                    "Model file not found: need to specify model (use dropdown)"
                 )
+            self.cp_model = models.CellposeModel(
+                gpu=True, pretrained_model=self.current_model_path
             )
-
-            try:
-                dP = self.view.flows[2].squeeze()
-                cellprob = self.view.flows[3].squeeze()
-            except IndexError:
-                self.view.logger.error("Flows don't exist, try running model again.")
-                return
-
-            maski = dynamics.resize_and_compute_masks(
-                dP=dP,
-                cellprob=cellprob,
-                niter=segmentation_params["niter"],
-                do_3D=self.view.load_3D,
-                min_size=min_size,
-                cellprob_threshold=segmentation_params["cellprob_threshold"],
-                flow_threshold=segmentation_params["flow_threshold"],
+        else:
+            self.current_model = model_name
+            self.current_model_path = os.fspath(
+                models.MODEL_DIR.joinpath(self.current_model)
             )
-
-            if maski.ndim < 3:
-                maski = maski[np.newaxis, ...]
-            self.view.logger.info("%d cells found" % (len(np.unique(maski)[1:])))
-            self._apply_masks_to_view(maski)
-            self.view.show()
+            self.cp_model = models.CellposeModel(
+                gpu=True, pretrained_model=self.current_model
+            )
 
     def compute_segmentation(
         self, custom: bool = False, model_name: str | None = None, load_model: bool = True
     ) -> None:
-        self.view.progress.setValue(0)
+        self.view.set_progress(0)
         try:
             tic = time.time()
-            self.view.clear_all()
-            self.view.flows = [[], [], []]
+            self.clear_all()
+            self.session.flows = [[], [], []]
             if load_model:
-                self.view.initialize_model(model_name=model_name, custom=custom)
-            self.view.progress.setValue(10)
-            do_3D = self.view.load_3D
-            stitch_threshold = (
-                float(self.view.stitch_threshold.text())
-                if not isinstance(self.view.stitch_threshold, float)
-                else self.view.stitch_threshold
-            )
-            anisotropy = (
-                float(self.view.anisotropy.text())
-                if not isinstance(self.view.anisotropy, float)
-                else self.view.anisotropy
-            )
-            flow3D_smooth = (
-                float(self.view.flow3D_smooth.text())
-                if not isinstance(self.view.flow3D_smooth, float)
-                else self.view.flow3D_smooth
-            )
-            min_size = (
-                int(self.view.min_size.text())
-                if not isinstance(self.view.min_size, int)
-                else self.view.min_size
-            )
-
-            do_3D = False if stitch_threshold > 0.0 else do_3D
-
-            if self.view.restore == "filter":
-                data = self.view.stack_filtered.copy().squeeze()
+                self.initialize_model(model_name=model_name, custom=custom)
+            self.view.set_progress(10)
+            opts = self.view.read_inference_options()
+            do_3d = opts["load_3D"]
+            stitch_threshold = opts["stitch_threshold"]
+            anisotropy = opts["anisotropy"]
+            flow3d_smooth = opts["flow3D_smooth"]
+            min_size = opts["min_size"]
+            do_3d = False if stitch_threshold > 0.0 else do_3d
+            if self.session.restore == "filter":
+                data = self.session.stack_filtered.copy().squeeze()
             else:
-                data = self.view.stack.copy().squeeze()
-
-            segmentation_params = self.view.get_segmentation_parameters()
-            normalize_params = self.view.get_normalize_params()
-            print(normalize_params)
+                data = self.session.stack.copy().squeeze()
+            segmentation_params = self.segmentation_parameters_dict()
+            normalize_params = self.get_normalize_params()
             try:
-                masks, flows = self.view.cp_model.eval(
+                masks, flows = self.cp_model.eval(
                     data,
                     diameter=segmentation_params["diameter"],
                     cellprob_threshold=segmentation_params["cellprob_threshold"],
                     flow_threshold=segmentation_params["flow_threshold"],
-                    do_3D=do_3D,
+                    do_3D=do_3d,
                     niter=segmentation_params["niter"],
                     normalize=normalize_params,
                     stitch_threshold=stitch_threshold,
                     anisotropy=anisotropy,
-                    flow3D_smooth=flow3D_smooth,
+                    flow3D_smooth=flow3d_smooth,
                     min_size=min_size,
                     channel_axis=-1,
-                    progress=self.view.progress,
-                    z_axis=0 if self.view.NZ > 1 else None,
+                    progress=self.view.progress_widget(),
+                    z_axis=0 if self.session.nz > 1 else None,
                 )[:2]
             except Exception as e:
                 print("NET ERROR: %s" % e)
-                self.view.progress.setValue(0)
+                self.view.set_progress(0)
                 return
-
-            self.view.progress.setValue(75)
-
-            flows_new = []
-            flows_new.append(flows[0].copy())
-            flows_new.append(
-                (np.clip(normalize99(flows[2].copy()), 0, 1) * 255).astype("uint8")
-            )
-            flows_new.append(flows[1].copy())
-            flows_new.append(flows[2].copy())
-
-            if self.view.load_3D:
+            self.view.set_progress(75)
+            flows_new = [
+                flows[0].copy(),
+                (np.clip(normalize99(flows[2].copy()), 0, 1) * 255).astype("uint8"),
+                flows[1].copy(),
+                flows[2].copy(),
+            ]
+            if opts["load_3D"]:
                 if stitch_threshold == 0.0:
                     flows_new.append((flows[1][0] / 10 * 127 + 127).astype("uint8"))
                 else:
                     flows_new.append(np.zeros(flows[1][0].shape, dtype="uint8"))
-
-            if not self.view.load_3D:
-                if self.view.restore and "upsample" in self.view.restore:
-                    self.view.Ly, self.view.Lx = self.view.Lyr, self.view.Lxr
-
-                if flows_new[0].shape[-3:-1] != (self.view.Ly, self.view.Lx):
-                    self.view.flows = []
-                    for j in range(len(flows_new)):
-                        self.view.flows.append(
+            if not opts["load_3D"]:
+                if self.session.restore and "upsample" in self.session.restore:
+                    self.session.ly, self.session.lx = self.session.lyr, self.session.lxr
+                if flows_new[0].shape[-3:-1] != (self.session.ly, self.session.lx):
+                    self.session.flows = []
+                    for flow_item in flows_new:
+                        self.session.flows.append(
                             resize_image(
-                                flows_new[j],
-                                Ly=self.view.Ly,
-                                Lx=self.view.Lx,
+                                flow_item,
+                                Ly=self.session.ly,
+                                Lx=self.session.lx,
                                 interpolation=cv2.INTER_NEAREST,
                             )
                         )
                 else:
-                    self.view.flows = flows_new
+                    self.session.flows = flows_new
             else:
-                self.view.flows = []
-                Lz, Ly, Lx = self.view.NZ, self.view.Ly, self.view.Lx
-                Lz0, Ly0, Lx0 = flows_new[0].shape[:3]
-                print("GUI_INFO: resizing flows to original image size")
-                for j in range(len(flows_new)):
-                    flow0 = flows_new[j]
-                    if Ly0 != Ly:
+                self.session.flows = []
+                lz, ly, lx = self.session.nz, self.session.ly, self.session.lx
+                lz0, ly0, lx0 = flows_new[0].shape[:3]
+                for flow_item in flows_new:
+                    flow0 = flow_item
+                    if ly0 != ly:
                         flow0 = resize_image(
                             flow0,
-                            Ly=Ly,
-                            Lx=Lx,
+                            Ly=ly,
+                            Lx=lx,
                             no_channels=flow0.ndim == 3,
                             interpolation=cv2.INTER_NEAREST,
                         )
-                    if Lz0 != Lz:
+                    if lz0 != lz:
                         flow0 = np.swapaxes(
                             resize_image(
                                 np.swapaxes(flow0, 0, 1),
-                                Ly=Lz,
-                                Lx=Lx,
+                                Ly=lz,
+                                Lx=lx,
                                 no_channels=flow0.ndim == 3,
                                 interpolation=cv2.INTER_NEAREST,
                             ),
                             0,
                             1,
                         )
-                    self.view.flows.append(flow0)
-
-            if self.view.NZ == 1:
+                    self.session.flows.append(flow0)
+            if self.session.nz == 1:
                 masks = masks[np.newaxis, ...]
-                self.view.flows = [
-                    self.view.flows[n][np.newaxis, ...]
-                    for n in range(len(self.view.flows))
+                self.session.flows = [
+                    self.session.flows[n][np.newaxis, ...]
+                    for n in range(len(self.session.flows))
                 ]
-
             self.view.logger.info(
                 "%d cells found with model in %0.3f sec"
                 % (len(np.unique(masks)[1:]), time.time() - tic)
             )
-            self.view.progress.setValue(80)
+            self.view.set_progress(80)
             self._apply_masks_to_view(masks)
-            self.view.progress.setValue(100)
-            if not do_3D and not stitch_threshold > 0:
-                self.view.recompute_masks = True
-            else:
-                self.view.recompute_masks = False
+            self.view.set_progress(100)
+            self.session.recompute_masks = not do_3d and not stitch_threshold > 0
         except Exception as e:
             print("ERROR: %s" % e)
 
@@ -531,45 +871,171 @@ class MainPresenter:
             colors=colors,
             colormap=self.view.colormap,
         )
-        self.view._sync_ncells_counter()
+        self.view.set_ncells_count(ncells)
         print(f"GUI_INFO: {ncells} masks found")
         if ncells > 0:
-            self.view.draw_layer()
-            self.view.toggle_mask_ops()
-        if hasattr(self.view, "stack_filtered") and self.view.stack_filtered is not None:
-            self.view.ViewDropDown.setCurrentIndex(self.view.ViewDropDown.count() - 1)
+            self.refresh_mask_layer()
+            self.view.set_mask_action_enabled(True)
+        restored = self.session.stack_filtered is not None
+        self.view.set_view_mode(3 if restored else 0, restored_enabled=restored)
+
+    def on_load_seg_session(
+        self,
+        session_data,
+        ismanual: np.ndarray | None = None,
+        flows=None,
+        recompute_masks: bool = False,
+        instance_classes=None,
+    ) -> None:
+        if instance_classes is not None:
+            self.set_instance_classes(instance_classes)
+        if ismanual is not None and len(ismanual) == self.ncells():
+            self.session.ismanual = ismanual
+        if flows:
+            self.session.flows = flows
+            self.session.recompute_masks = recompute_masks
         else:
-            self.view.ViewDropDown.setCurrentIndex(0)
+            self.session.recompute_masks = False
+        self.model.session.loaded = True
+        self.view.set_loaded_chrome(True)
+        self.refresh_mask_layer()
 
     def save_sets(self) -> None:
-        import os
-
         from cellpose.gui.session_format import write_session
 
-        filename = self.output_filename(str(self.view.filename))
+        filename = self.output_filename(str(self.model.filename))
         base = os.path.splitext(filename)[0]
         path = base + "_seg.cellpose"
         segmentation_params = self.segmentation_parameters_dict()
-        normalize_params = self.view.get_normalize_params()
+        normalize_params = self.get_normalize_params()
         self.model.segmentation_params = segmentation_params
         self.model.preprocessing_params = normalize_params
-
-        model_name = "cpsam"
-        if hasattr(self.view, "ModelChooseC"):
-            model_name = self.view.ModelChooseC.currentText().lower()
-
-        source_image = str(self.view.filename) if self.view.filename else filename
+        model_name, _ = self.view.read_selected_model()
+        source_image = str(self.model.filename) if self.model.filename else filename
         session_data = self.model.to_session_data(
             source_image=source_image,
             model=model_name,
             segmentation_params=segmentation_params,
-            recompute_masks=bool(getattr(self.view, "recompute_masks", False)),
+            recompute_masks=bool(self.session.recompute_masks),
         )
         try:
             written = write_session(path, session_data)
-            print(
-                "GUI_INFO: %d ROIs saved to %s"
-                % (self.view.ncells(), written)
-            )
+            print("GUI_INFO: %d ROIs saved to %s" % (self.ncells(), written))
         except Exception as e:
             print(f"ERROR: {e}")
+
+    def train_new_model(self) -> None:
+        from .dialogs import TrainWindow
+
+        if self.session.nz != 1:
+            print("ERROR: cannot train model on 3D data")
+            return
+        current_train_data_folder = self.training_params().get("train_data_folder", "")
+        if not current_train_data_folder:
+            current_train_data_folder = (
+                os.path.dirname(str(self.model.filename))
+                if self.model.filename
+                else ""
+            )
+            self.set_training_parameters(
+                {"train_data_folder": current_train_data_folder}
+            )
+        train_data, train_labels, train_files, restore, normalize_params = (
+            [],
+            [],
+            [],
+            None,
+            copy.deepcopy(normalize_default),
+        )
+        if current_train_data_folder:
+            try:
+                (
+                    train_data,
+                    train_labels,
+                    train_files,
+                    restore,
+                    normalize_params,
+                ) = io._get_train_set(
+                    get_image_files(current_train_data_folder, "_masks", look_one_level_down=True)
+                )
+            except ValueError as e:
+                self.view.logger.info(str(e))
+                train_files = []
+        tw = TrainWindow(self.view, models.MODEL_NAMES)
+        if tw.exec():
+            train_data_folder = self.training_params().get("train_data_folder", "")
+            if not train_data_folder:
+                self.view.show_message("Train", "No training folder specified.")
+                return
+            try:
+                (
+                    train_data,
+                    train_labels,
+                    train_files,
+                    restore,
+                    normalize_params,
+                ) = io._get_train_set(
+                    get_image_files(train_data_folder, "_masks", look_one_level_down=True)
+                )
+            except ValueError as e:
+                self.view.logger.info(str(e))
+                self.view.show_message("Train", str(e))
+                return
+            if len(train_files) == 0:
+                self.view.show_message(
+                    "Train",
+                    "No valid training images with _seg.cellpose found in folder.",
+                )
+                return
+            self.view.logger.info(
+                f"training with {[os.path.split(f)[1] for f in train_files]}"
+            )
+            self._train_model(
+                train_data,
+                train_labels,
+                restore=restore,
+                normalize_params=normalize_params,
+            )
+        else:
+            print("GUI_INFO: training cancelled")
+
+    def _train_model(self, train_data, train_labels, restore=None, normalize_params=None):
+        if normalize_params is None:
+            normalize_params = copy.deepcopy(normalize_default)
+        model_type = models.MODEL_NAMES[self.training_params()["model_index"]]
+        self.view.logger.info(f"training new model starting at model {model_type}")
+        self.current_model = model_type
+        self.cp_model = models.CellposeModel(gpu=True, model_type=model_type)
+        save_path = os.fspath(models.MODEL_DIR.joinpath("custom"))
+        os.makedirs(save_path, exist_ok=True)
+        print("GUI_INFO: name of new model: " + self.training_params()["model_name"])
+        new_model_path, train_losses = train.train_seg(
+            self.cp_model.net,
+            train_data=train_data,
+            train_labels=train_labels,
+            normalize=normalize_params,
+            min_train_masks=0,
+            save_path=save_path,
+            nimg_per_epoch=max(2, len(train_data)),
+            learning_rate=self.training_params()["learning_rate"],
+            weight_decay=self.training_params()["weight_decay"],
+            n_epochs=self.training_params()["n_epochs"],
+            model_name=self.training_params()["model_name"],
+            save_to_models_dir=False,
+        )[:2]
+        np.save(str(new_model_path) + "_train_losses.npy", train_losses)
+        io._add_model(self.view, new_model_path)
+        self.session.restore = restore
+        self.set_normalize_params(normalize_params)
+        self.clear_all()
+        self.get_next_image(load_seg=False)
+        self.compute_segmentation(custom=True)
+        self.view.logger.info(
+            f"!!! computed masks for {os.path.split(self.model.filename)[1]} from new model !!!"
+        )
+
+    def add_model(self, filename=None) -> None:
+        io._add_model(self.view, filename=filename)
+
+    def remove_model(self) -> None:
+        io._remove_model(self.view)

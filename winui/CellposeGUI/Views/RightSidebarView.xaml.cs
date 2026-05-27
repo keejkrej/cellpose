@@ -7,6 +7,8 @@ namespace CellposeGUI.Views;
 
 public sealed partial class RightSidebarView : UserControl
 {
+    private bool _syncingLabelsSelection;
+
     public RightSidebarView()
     {
         InitializeComponent();
@@ -34,7 +36,7 @@ public sealed partial class RightSidebarView : UserControl
         {
             newViewModel.PropertyChanged += view.OnViewModelPropertyChanged;
             view.RefreshSegmentationGrid();
-            view.RefreshInstanceGrid();
+            view.RefreshLabelsGrid();
         }
     }
 
@@ -47,8 +49,11 @@ public sealed partial class RightSidebarView : UserControl
                 break;
             case nameof(MainViewModel.Ncells):
             case nameof(MainViewModel.ClassFilterText):
-            case nameof(MainViewModel.InstanceRowsRevision):
-                RefreshInstanceGrid();
+            case nameof(MainViewModel.LabelsRowsRevision):
+                RefreshLabelsGrid();
+                break;
+            case nameof(MainViewModel.SelectionRevision):
+                SyncLabelsGridSelection();
                 break;
         }
     }
@@ -61,19 +66,58 @@ public sealed partial class RightSidebarView : UserControl
         SegmentationGrid.ItemsSource = SegmentationParamRowViewModel.CreateRows(ViewModel);
     }
 
-    private void InstanceGrid_LoadingRow(object sender, DataGridRowEventArgs e)
+    private void LabelsGrid_LoadingRow(object sender, DataGridRowEventArgs e)
     {
-        if (e.Row.DataContext is InstanceRowViewModel row)
+        if (e.Row.DataContext is LabelRowViewModel row)
             e.Row.Visibility = row.IsHiddenByFilter ? Visibility.Collapsed : Visibility.Visible;
     }
 
-    private void RefreshInstanceGrid()
+    private void RefreshLabelsGrid()
     {
         if (ViewModel == null)
             return;
 
-        InstanceGrid.ItemsSource = Enumerable.Range(0, ViewModel.Ncells)
-            .Select(row => new InstanceRowViewModel(ViewModel, row))
+        LabelsGrid.ItemsSource = Enumerable.Range(0, ViewModel.Ncells)
+            .Select(row => new LabelRowViewModel(ViewModel, row))
             .ToList();
+        SyncLabelsGridSelection();
+    }
+
+    private void LabelsGrid_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_syncingLabelsSelection || ViewModel == null)
+            return;
+
+        var cells = LabelsGrid.SelectedItems
+            .OfType<LabelRowViewModel>()
+            .Select(row => row.Row + 1)
+            .Distinct()
+            .OrderBy(v => v)
+            .ToList();
+        ViewModel.SetCellSelection(cells);
+    }
+
+    private void SyncLabelsGridSelection()
+    {
+        if (ViewModel == null || LabelsGrid.ItemsSource == null)
+            return;
+
+        var selectedRows = ViewModel.SelectedCellIndices()
+            .Select(idx => idx - 1)
+            .Where(row => row >= 0 && row < ViewModel.Ncells)
+            .ToHashSet();
+
+        _syncingLabelsSelection = true;
+        LabelsGrid.SelectedItems.Clear();
+        if (LabelsGrid.ItemsSource is IEnumerable<LabelRowViewModel> rows)
+        {
+            foreach (var row in rows)
+            {
+                if (selectedRows.Contains(row.Row))
+                    LabelsGrid.SelectedItems.Add(row);
+            }
+        }
+
+        _syncingLabelsSelection = false;
     }
 }

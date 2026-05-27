@@ -89,7 +89,7 @@
             </Expander>
 
             <Expander
-                Header="Instances"
+                Header="Labels table"
                 IsExpanded="True"
                 HorizontalAlignment="Stretch"
                 HorizontalContentAlignment="Stretch">
@@ -102,9 +102,9 @@
                     <Grid Padding="4,0,8,0" ColumnDefinitions="52,60,*">
                         <CheckBox
                             Grid.Column="0"
-                            Style="{StaticResource InstanceVisibilityCheckBoxStyle}"
+                            Style="{StaticResource LabelsVisibilityCheckBoxStyle}"
                             IsThreeState="True"
-                            IsChecked="{x:Bind ViewModel.AllInstancesVisible, Mode=TwoWay}" />
+                            IsChecked="{x:Bind ViewModel.AllLabelsVisible, Mode=TwoWay}" />
                         <TextBlock
                             Grid.Column="1"
                             VerticalAlignment="Center"
@@ -117,7 +117,7 @@
                             Text="Class ID" />
                     </Grid>
                     <controls:DataGrid
-                        x:Name="InstanceGrid"
+                        x:Name="LabelsGrid"
                         HorizontalAlignment="Stretch"
                         MinHeight="120"
                         RowHeight="36"
@@ -128,17 +128,18 @@
                         HeadersVisibility="None"
                         HorizontalScrollBarVisibility="Disabled"
                         SelectionMode="Extended"
-                        LoadingRow="InstanceGrid_LoadingRow">
+                        SelectionChanged="LabelsGrid_SelectionChanged"
+                        LoadingRow="LabelsGrid_LoadingRow">
                         <controls:DataGrid.Columns>
                             <controls:DataGridCheckBoxColumn
                                 Width="52"
                                 MinWidth="52"
                                 Binding="{Binding Visible, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}">
                                 <controls:DataGridCheckBoxColumn.ElementStyle>
-                                    <Style TargetType="CheckBox" BasedOn="{StaticResource InstanceVisibilityCheckBoxStyle}" />
+                                    <Style TargetType="CheckBox" BasedOn="{StaticResource LabelsVisibilityCheckBoxStyle}" />
                                 </controls:DataGridCheckBoxColumn.ElementStyle>
                                 <controls:DataGridCheckBoxColumn.EditingElementStyle>
-                                    <Style TargetType="CheckBox" BasedOn="{StaticResource InstanceVisibilityCheckBoxStyle}" />
+                                    <Style TargetType="CheckBox" BasedOn="{StaticResource LabelsVisibilityCheckBoxStyle}" />
                                 </controls:DataGridCheckBoxColumn.EditingElementStyle>
                             </controls:DataGridCheckBoxColumn>
                             <controls:DataGridTextColumn
@@ -147,7 +148,7 @@
                                 IsReadOnly="True" />
                             <controls:DataGridTemplateColumn Width="*">
                                 <controls:DataGridTemplateColumn.CellTemplate>
-                                    <DataTemplate x:DataType="vm:InstanceRowViewModel">
+                                    <DataTemplate x:DataType="vm:LabelRowViewModel">
                                         <NumberBox
                                             Margin="0,2"
                                             HorizontalAlignment="Stretch"

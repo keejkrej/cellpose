@@ -55,15 +55,45 @@ struct LeftSidebarView: View {
                         .toggleStyle(.button)
                         .disabled(!viewModel.imageLoaded)
                         .onChange(of: viewModel.brushMode) { _, enabled in
-                            if !enabled {
+                            if enabled {
+                                viewModel.selectMode = false
+                            } else {
                                 viewModel.cancelStroke()
                             }
                         }
+                    Toggle("select", isOn: $viewModel.selectMode)
+                        .toggleStyle(.button)
+                        .disabled(!viewModel.canUseLabelTools)
+                        .onChange(of: viewModel.selectMode) { _, enabled in
+                            if enabled {
+                                viewModel.brushMode = false
+                                viewModel.cancelStroke()
+                            }
+                        }
+                    Button("delete") {
+                        Task { await viewModel.deleteSelectedCells() }
+                    }
+                    .disabled(!viewModel.canUseLabelTools)
+                    Button("edit") {
+                        if !viewModel.prepareEditSelectedCells() {
+                            viewModel.errorMessage = "Select one or more cells first."
+                        }
+                    }
+                    .disabled(!viewModel.canUseLabelTools)
                     HStack {
                         Text("default class")
                         TextField("0", value: $viewModel.defaultClassID, format: .number)
                             .frame(width: 60)
                     }
+                }
+                .alert("Edit class", isPresented: $viewModel.showEditClassDialog) {
+                    TextField("Class ID", value: $viewModel.editClassInitialValue, format: .number)
+                    Button("OK") {
+                        viewModel.applyClassToSelectedCells(classID: viewModel.editClassInitialValue)
+                    }
+                    Button("Cancel", role: .cancel) {}
+                } message: {
+                    Text("Class ID for selected cell(s)")
                 }
             }
             .padding(.vertical, 8)

@@ -59,13 +59,13 @@ struct RightSidebarView: View {
                     }
                 }
 
-                SidebarPanel(title: "Instances") {
+                SidebarPanel(title: "Labels table") {
                     HStack {
                         Text("class filter:")
                         TextField("all", text: $viewModel.classFilterText)
-                            .onSubmit { viewModel.refreshInstanceFilter() }
+                            .onSubmit { viewModel.refreshLabelsFilter() }
                     }
-                    InstanceTableView(viewModel: viewModel)
+                    LabelsTableView(viewModel: viewModel)
                         .frame(minHeight: 120)
                 }
             }
@@ -77,7 +77,7 @@ struct RightSidebarView: View {
     }
 }
 
-struct InstanceTableView: View {
+struct LabelsTableView: View {
     @Bindable var viewModel: MainViewModel
 
     var body: some View {
@@ -90,7 +90,7 @@ struct InstanceTableView: View {
                 Text("")
                     .frame(height: 1)
             } else {
-                List(0 ..< viewModel.ncells, id: \.self) { row in
+                List(viewModel.ncells > 0 ? Array(0 ..< viewModel.ncells) : [], id: \.self, selection: $viewModel.selectedLabelRows) { row in
                     HStack {
                         Text("\(row + 1)")
                             .frame(width: 60, alignment: .leading)
@@ -110,6 +110,10 @@ struct InstanceTableView: View {
                         )
                         .frame(width: 60)
                     }
+                }
+                .frame(minHeight: 120)
+                .onChange(of: viewModel.selectedLabelRows) { _, rows in
+                    viewModel.setCellSelection(rows.sorted().map { Int32($0 + 1) })
                 }
             }
         }

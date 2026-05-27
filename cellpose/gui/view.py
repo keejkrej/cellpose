@@ -15,7 +15,6 @@ import sys
 import time
 import warnings
 
-import cv2
 import numpy as np
 
 os.environ.setdefault("PYQTGRAPH_QT_LIB", "PySide6")
@@ -26,6 +25,8 @@ from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QCompleter,
+    QDialog,
+    QDialogButtonBox,
     QGridLayout,
     QGroupBox,
     QHeaderView,
@@ -44,16 +45,14 @@ from PySide6.QtWidgets import (
 import pyqtgraph as pg
 from pyqtgraph.parametertree import Parameter, ParameterTree
 
-from .. import dynamics, models, train, version
+from .. import models, version
 from ..io import get_image_files
 from ..models import normalize_default
-from ..plot import disk
-from ..transforms import normalize99, resize_image
 from ..utils import download_url_to_file
 from . import io, menus, series
-from .dialogs import TrainWindow
-from .model import MainModel
+from .model import MainModel, SegmentationParameters, SeriesState
 from .presenter import MainPresenter
+from .view_protocol import LabelRow, SeriesNavViewState
 from .widgets import (
     CheckBoxHeader,
     ImageDraw,
@@ -62,7 +61,9 @@ from .widgets import (
     Slider,
     ViewBoxNoRightDrag,
     as_gray_image,
+    brush_cursor,
     make_bwr,
+    select_cursor,
 )
 
 try:
@@ -71,85 +72,6 @@ try:
     MATPLOTLIB = True
 except:
     MATPLOTLIB = False
-
-# Legacy attribute names on MainView map to MainModel sub-objects.
-_MODEL_ATTR_MAP: dict[str, tuple[str, str] | None] = {
-    "stack": ("session", "stack"),
-    "stack_filtered": ("session", "stack_filtered"),
-    "cellpix": ("session", "cellpix"),
-    "cellpix_orig": ("session", "cellpix_orig"),
-    "cellpix_resize": ("session", "cellpix_resize"),
-    "outpix": ("session", "outpix"),
-    "outpix_orig": ("session", "outpix_orig"),
-    "outpix_resize": ("session", "outpix_resize"),
-    "flows": ("session", "flows"),
-    "cellcolors": ("session", "cellcolors"),
-    "ismanual": ("session", "ismanual"),
-    "zdraw": ("session", "zdraw"),
-    "layerz": ("session", "layerz"),
-    "restore": ("session", "restore"),
-    "ratio": ("session", "ratio"),
-    "loaded": ("session", "loaded"),
-    "currentZ": ("session", "current_z"),
-    "NZ": ("session", "nz"),
-    "Ly": ("session", "ly"),
-    "Lx": ("session", "lx"),
-    "Ly0": ("session", "ly0"),
-    "Lx0": ("session", "lx0"),
-    "Lyr": ("session", "lyr"),
-    "Lxr": ("session", "lxr"),
-    "saturation": ("session", "saturation"),
-    "track_changes": ("session", "track_changes"),
-    "recompute_masks": ("session", "recompute_masks"),
-    "opacity": ("session", "opacity"),
-    "outcolor": ("session", "outcolor"),
-    "resize": ("session", "resize"),
-    "selected": ("selection", "selected"),
-    "prev_selected": ("selection", "prev_selected"),
-    "selected_cells": ("selection", "selected_cells"),
-    "removed_cell": ("selection", "removed_cell"),
-    "removing_cells_list": ("selection", "removing_cells_list"),
-    "deleting_multiple": ("selection", "deleting_multiple"),
-    "removing_region": ("selection", "removing_region"),
-    "strokes": ("drawing", "strokes"),
-    "current_point_set": ("drawing", "current_point_set"),
-    "in_stroke": ("drawing", "in_stroke"),
-    "stroke_appended": ("drawing", "stroke_appended"),
-    "brush_mode": ("drawing", "brush_mode"),
-    "filename": None,
-    "display_filename": None,
-    "output_filename": None,
-    "series_dataset": None,
-    "series_index": None,
-}
-
-
-def _model_get(view, name: str):
-    target = _MODEL_ATTR_MAP[name]
-    if target is None:
-        if name == "series_dataset":
-            return view.model.series_state.dataset
-        if name == "series_index":
-            return view.model.series_state.record_index
-        return getattr(view.model, name)
-    container, attr = target
-    return getattr(getattr(view.model, container), attr)
-
-
-def _model_set(view, name: str, value):
-    target = _MODEL_ATTR_MAP[name]
-    if target is None:
-        if name == "series_dataset":
-            view.model.series_state.dataset = value
-            return
-        if name == "series_index":
-            view.model.series_state.record_index = value
-            return
-        setattr(view.model, name, value)
-        return
-    container, attr = target
-    setattr(getattr(view.model, container), attr, value)
-
 
 def run(image=None):
     from ..io import logger_setup
@@ -186,23 +108,6 @@ def run(image=None):
 class MainView(QMainWindow):
     """Passive Qt view for the Cellpose GUI MVP stack."""
 
-    def __getattr__(self, name: str):
-        if name in _MODEL_ATTR_MAP:
-            return _model_get(self, name)
-        raise AttributeError(name)
-
-    def __setattr__(self, name: str, value):
-        if name in _MODEL_ATTR_MAP and "model" in self.__dict__:
-            _model_set(self, name, value)
-            if name in ("cellpix", "cellpix_resize"):
-                self._sync_ncells_counter()
-            return
-        super().__setattr__(name, value)
-
-    def _sync_ncells_counter(self):
-        if hasattr(self, "ncells_counter"):
-            self.ncells_counter.set(self.model.ncells)
-
     def __init__(self, image=None, logger=None):
         super(MainView, self).__init__()
 
@@ -230,8 +135,8 @@ class MainView(QMainWindow):
         menus.editmenu(self)
         menus.modelmenu(self)
 
-        self.loaded = False
-        self.recompute_masks = False
+        self.model.session.loaded = False
+        self.model.session.recompute_masks = False
 
         # ---- MAIN WIDGET LAYOUT ---- #
         self.cwidget = QWidget(self)
@@ -241,6 +146,10 @@ class MainView(QMainWindow):
         self.lmain.setContentsMargins(0, 0, 0, 10)
 
         self.imask = 0
+        self.rect_select_mode = False
+        self._rect_select_start = None
+        self._rect_select_dragging = False
+        self._rect_select_drag_threshold = 4
         self.left_sidebar = QGridLayout()
         self.left_sidebar_widget = QWidget(self)
         self.left_sidebar_widget.setLayout(self.left_sidebar)
@@ -258,7 +167,9 @@ class MainView(QMainWindow):
         self.win.scene().sigMouseClicked.connect(self.plot_clicked)
         self.win.scene().sigMouseMoved.connect(self.mouse_moved)
         self.make_viewbox()
-        self.win.scene().installEventFilter(self)
+        viewport = self._canvas_viewport()
+        if viewport is not None:
+            viewport.installEventFilter(self)
         bwrmap = make_bwr()
         self.bwr = bwrmap.getLookupTable(start=0.0, stop=255.0, alpha=False)
         if MATPLOTLIB:
@@ -272,9 +183,9 @@ class MainView(QMainWindow):
             self.colormap = ((np.random.rand(1000000, 3) * 0.8 + 0.1) * 255).astype(
                 np.uint8
             )
-        self.NZ = 1
-        self.restore = None
-        self.ratio = 1.0
+        self.model.session.nz = 1
+        self.model.session.restore = None
+        self.model.session.ratio = 1.0
         self.last_series_subfolder_template = ""
         self.last_series_filename_template = ""
         self.reset()
@@ -283,8 +194,8 @@ class MainView(QMainWindow):
 
         # if called with image, load it
         if image is not None:
-            self.filename = image
-            io._load_image(self, self.filename)
+            self.model.filename = image
+            io._load_image(self, self.model.filename)
 
         self.stitch_threshold = 0.0
         self.flow3D_smooth = 0.0
@@ -316,12 +227,12 @@ class MainView(QMainWindow):
         self.setWindowTitle(title)
 
     def sync_series_state(self, state):
-        self.series_dataset = state.dataset
-        self.series_index = state.record_index
-        self.output_filename = state.output_filename
-        self.display_filename = state.display_filename
+        self.model.series_state.dataset = state.dataset
+        self.model.series_state.record_index = state.record_index
+        self.model.series_state.output_filename = state.output_filename
+        self.model.series_state.display_filename = state.display_filename
         if state.filename is not None:
-            self.filename = state.filename
+            self.model.filename = state.filename
 
     def set_series_state(self, dataset=None, record_index=None):
         self.presenter.set_series(dataset=dataset, record_index=record_index)
@@ -345,10 +256,226 @@ class MainView(QMainWindow):
         if self.seg_param_root.param("niter").value() != params.niter:
             self.seg_param_root.param("niter").setValue(params.niter)
 
-    def instance_class_filter_text(self):
-        if not hasattr(self, "InstanceClassFilter"):
+    def labels_class_filter_text(self):
+        if not hasattr(self, "LabelsClassFilter"):
             return ""
-        return self.InstanceClassFilter.text()
+        return self.LabelsClassFilter.text()
+
+    # ---- MainViewProtocol: widget input ----
+
+    def read_labels_class_filter(self) -> str:
+        return self.labels_class_filter_text()
+
+    def read_default_class_id(self) -> int:
+        text = self.DefaultClassEdit.text().strip()
+        return int(text) if text else 0
+
+    def read_selected_model(self) -> tuple[str, bool]:
+        model_name = self.ModelChooseC.currentText().strip()
+        is_cpsam = model_name.lower() == "cpsam"
+        return ("cpsam" if is_cpsam else model_name, not is_cpsam)
+
+    def read_inference_options(self) -> dict:
+        def _read_value(attr, cast):
+            value = getattr(self, attr)
+            if isinstance(value, (int, float)):
+                return cast(value)
+            return cast(value.text())
+
+        return {
+            "load_3D": bool(self.load_3D),
+            "stitch_threshold": _read_value("stitch_threshold", float),
+            "anisotropy": _read_value("anisotropy", float),
+            "flow3D_smooth": _read_value("flow3D_smooth", float),
+            "min_size": _read_value("min_size", int),
+        }
+
+    def read_series_slider_axes(self) -> dict[str, int]:
+        return {
+            axis_name: control["slider"].value()
+            for axis_name, control in self.series_nav_controls.items()
+        }
+
+    def read_saturation_range(self) -> tuple[float, float]:
+        z = self.model.session.current_z
+        low, high = self.model.session.saturation[0][z]
+        return float(low), float(high)
+
+    def read_view_mode_index(self) -> int:
+        return int(self.ViewDropDown.currentIndex())
+
+    # ---- MainViewProtocol: widget output ----
+
+    def set_ncells_count(self, n: int) -> None:
+        if hasattr(self, "ncells_counter"):
+            self.ncells_counter.set(n)
+
+    def _sync_ncells_counter(self) -> None:
+        self.set_ncells_count(self.model.ncells)
+
+    def apply_series_labels(self, state: SeriesState) -> None:
+        self.sync_series_state(state)
+
+    def set_series_navigation(self, nav: SeriesNavViewState) -> None:
+        self._updating_series_navigation = True
+        try:
+            self.navBox.setEnabled(nav.enabled)
+            for axis_name, control in self.series_nav_controls.items():
+                slider = control["slider"]
+                prev_btn = control["prev_btn"]
+                next_btn = control["next_btn"]
+                if not nav.enabled:
+                    slider.setRange(0, 0)
+                    slider.setValue(0)
+                    slider.setEnabled(False)
+                    prev_btn.setEnabled(False)
+                    next_btn.setEnabled(False)
+                    continue
+                low, high = nav.axis_ranges.get(axis_name, (0, 0))
+                slider.setEnabled(True)
+                slider.setRange(low, high)
+                slider.setValue(nav.axis_values.get(axis_name, 0))
+                prev_btn.setEnabled(high > 0)
+                next_btn.setEnabled(high > 0)
+        finally:
+            self._updating_series_navigation = False
+
+    def set_view_mode(self, index: int, restored_enabled: bool) -> None:
+        last = self.ViewDropDown.count() - 1
+        self.ViewDropDown.model().item(last).setEnabled(restored_enabled)
+        self.ViewDropDown.setCurrentIndex(index)
+        self.view = index
+
+    def set_mask_action_enabled(self, enabled: bool) -> None:
+        self.saveResults.setEnabled(enabled)
+        self.ClearButton.setEnabled(enabled)
+        self.remcell.setEnabled(enabled)
+        self.undo.setEnabled(enabled)
+        if hasattr(self, "RectSelectButton"):
+            self.RectSelectButton.setEnabled(enabled)
+            if not enabled and self.RectSelectButton.isChecked():
+                self.RectSelectButton.setChecked(False)
+        if hasattr(self, "DeleteSelectedButton"):
+            self.DeleteSelectedButton.setEnabled(enabled)
+        if hasattr(self, "EditSelectedButton"):
+            self.EditSelectedButton.setEnabled(enabled)
+
+    def set_run_enabled(self, enabled: bool) -> None:
+        self.ModelButtonC.setEnabled(enabled)
+
+    def set_loaded_chrome(self, enabled: bool) -> None:
+        if enabled:
+            self.set_run_enabled(True)
+            for i in range(len(self.StyleButtons)):
+                self.StyleButtons[i].setEnabled(True)
+            self.autoSaturationButton.setEnabled(True)
+            self.newmodel.setEnabled(True)
+            self.sliders[0].setEnabled(True)
+            self.set_mask_action_enabled(self.ncells() > 0)
+            self.refresh_plot_from_model()
+            self._update_canvas_cursor()
+            title = self.model.series_state.display_filename or self.model.filename
+            if title:
+                self.set_window_title(str(title))
+        else:
+            self.disable_buttons_removeROIs()
+
+    def set_series_slider_value(self, axis_name: str, value: int) -> None:
+        control = self.series_nav_controls.get(axis_name)
+        if control is None:
+            return
+        control["slider"].setValue(value)
+
+    def is_updating_series_navigation(self) -> bool:
+        return bool(getattr(self, "_updating_series_navigation", False))
+
+    def set_updating_series_navigation(self, updating: bool) -> None:
+        self._updating_series_navigation = updating
+
+    def progress_widget(self):
+        return self.progress
+
+    def set_redo_enabled(self, enabled: bool) -> None:
+        self.redo.setEnabled(enabled)
+
+    def set_undo_enabled(self, enabled: bool) -> None:
+        self.undo.setEnabled(enabled)
+
+    def apply_segmentation_metadata_widgets(self, segmentation) -> None:
+        io._apply_cellpose_segmentation_widgets(self, segmentation)
+
+    def set_model_list(self, models: list[str], current: str | None = None) -> None:
+        self.model_strings = list(models)
+        self.ModelChooseC.clear()
+        self.ModelChooseC.addItems(["CPSAM"])
+        if models:
+            self.ModelChooseC.addItems(models)
+        if current:
+            self.ModelChooseC.setCurrentText(current)
+        elif models:
+            self.ModelChooseC.setCurrentIndex(len(models))
+
+    def show_window(self) -> None:
+        self.win.show()
+        self.show()
+
+    # ---- MainViewProtocol: canvas rendering ----
+
+    def render_image_plane(
+        self,
+        image: np.ndarray,
+        levels: list[float] | tuple[float, float],
+        lut: np.ndarray | None = None,
+    ) -> None:
+        self.img.setImage(as_gray_image(image), autoLevels=False, lut=lut)
+        self.img.setLevels(list(levels))
+
+    def render_mask_overlay(self, layerz: np.ndarray) -> None:
+        self.layer.setImage(layerz, autoLevels=False)
+        self._update_selection_boxes()
+
+    def render_diameter_scale(self, radii: np.ndarray) -> None:
+        self.scale.setImage(radii, autoLevels=False)
+        self.scale.setLevels([0.0, 255.0])
+
+    def render_selection_boxes(
+        self, bounds_list: list[tuple[int, int, int, int]]
+    ) -> None:
+        if not bounds_list:
+            self._clear_selection_boxes()
+            return
+        xs = []
+        ys = []
+        for x0, y0, x1, y1 in bounds_list:
+            xs.extend([x0, x1, x1, x0, x0, np.nan])
+            ys.extend([y0, y0, y1, y1, y0, np.nan])
+        self._ensure_selection_box()
+        self.selection_box.setData(
+            np.array(xs[:-1], dtype=float),
+            np.array(ys[:-1], dtype=float),
+            connect="finite",
+        )
+
+    def render_rect_select_preview(
+        self, bounds: tuple[int, int, int, int] | None
+    ) -> None:
+        if bounds is None:
+            self._clear_rect_select_preview()
+            return
+        x0, y0, x1, y1 = bounds
+        self._ensure_rect_select_preview()
+        self.rect_select_preview.setData(
+            [x0, x1, x1, x0, x0], [y0, y0, y1, y1, y0]
+        )
+
+    def sync_saturation_slider(self, low: float, high: float) -> None:
+        self.sliders[0].setValue([low, high])
+
+    def refresh_plot_from_model(self) -> None:
+        self.update_plot()
+
+    def refresh_scale_from_model(self) -> None:
+        self.update_scale()
 
     def make_buttons(self):
         b = 0
@@ -381,9 +508,6 @@ class MainView(QMainWindow):
             slider.setEnabled(False)
             slider.setTracking(True)
             slider.sliderReleased.connect(
-                lambda axis_name=axis_name: self._commit_series_slider(axis_name)
-            )
-            slider.keyboardRelease.connect(
                 lambda axis_name=axis_name: self._commit_series_slider(axis_name)
             )
             self.navBoxG.addWidget(slider, row, 2, 1, 1)
@@ -455,15 +579,30 @@ class MainView(QMainWindow):
         self.BrushButton.toggled.connect(self.toggle_brush_mode)
         self.drawBoxV.addWidget(self.BrushButton)
 
-        select_layout = QHBoxLayout()
+        select_layout = QVBoxLayout()
         self.RectSelectButton = QPushButton("select")
         self.RectSelectButton.setCheckable(True)
         self.RectSelectButton.setEnabled(False)
         self.RectSelectButton.setToolTip(
-            "Draw a rectangle on the canvas to select cells fully inside it"
+            "Click a cell to select it, Shift+click to add to selection, "
+            "or drag a rectangle for multiple selection"
         )
         self.RectSelectButton.toggled.connect(self.toggle_rect_select_mode)
         select_layout.addWidget(self.RectSelectButton)
+        self.DeleteSelectedButton = QPushButton("delete")
+        self.DeleteSelectedButton.setEnabled(False)
+        self.DeleteSelectedButton.setToolTip(
+            "Delete the currently selected cell(s)"
+        )
+        self.DeleteSelectedButton.clicked.connect(self.delete_selected_cells)
+        select_layout.addWidget(self.DeleteSelectedButton)
+        self.EditSelectedButton = QPushButton("edit")
+        self.EditSelectedButton.setEnabled(False)
+        self.EditSelectedButton.setToolTip(
+            "Change the class ID for all selected cell(s)"
+        )
+        self.EditSelectedButton.clicked.connect(self.edit_selected_cells)
+        select_layout.addWidget(self.EditSelectedButton)
         self.drawBoxV.addLayout(select_layout)
 
         b += 1
@@ -497,39 +636,39 @@ class MainView(QMainWindow):
         self.ModelButtonC.setEnabled(False)
 
         self.ncells_counter = ObservableVariable(0)
-        self.ncells_counter.valueChanged.connect(lambda *_: self.refresh_instance_table())
+        self.ncells_counter.valueChanged.connect(lambda *_: self.refresh_labels_table())
 
-        self.instanceBox = QGroupBox("Instances")
-        self.instanceBoxV = QVBoxLayout()
-        self.instanceBox.setLayout(self.instanceBoxV)
-        self.right_sidebar.addWidget(self.instanceBox, 2, 0, 1, 1)
+        self.labels_box = QGroupBox("Labels table")
+        self.labels_box_v = QVBoxLayout()
+        self.labels_box.setLayout(self.labels_box_v)
+        self.right_sidebar.addWidget(self.labels_box, 2, 0, 1, 1)
 
-        instance_filter_layout = QHBoxLayout()
-        instance_filter_layout.addWidget(QLabel("class filter:"))
-        self.InstanceClassFilter = QLineEdit()
-        self.InstanceClassFilter.setPlaceholderText("all")
-        self.InstanceClassFilter.returnPressed.connect(self.instance_filter_changed)
-        instance_filter_layout.addWidget(self.InstanceClassFilter)
-        self.instanceBoxV.addLayout(instance_filter_layout)
+        labels_filter_layout = QHBoxLayout()
+        labels_filter_layout.addWidget(QLabel("class filter:"))
+        self.LabelsClassFilter = QLineEdit()
+        self.LabelsClassFilter.setPlaceholderText("all")
+        self.LabelsClassFilter.returnPressed.connect(self.labels_filter_changed)
+        labels_filter_layout.addWidget(self.LabelsClassFilter)
+        self.labels_box_v.addLayout(labels_filter_layout)
 
-        self._refreshing_instance_table = False
-        self._syncing_table_selection = False
-        self.InstanceTable = QTableWidget(0, 3)
-        visibility_header = CheckBoxHeader(QtCore.Qt.Orientation.Horizontal, self.InstanceTable)
-        visibility_header.checkboxClicked.connect(self._toggle_all_instance_visibility)
-        self.InstanceTable.setHorizontalHeader(visibility_header)
-        self.InstanceTable.setHorizontalHeaderLabels(["", "ROI", "Class ID"])
+        self._refreshing_labels_table = False
+        self._syncing_labels_table_selection = False
+        self.LabelsTable = QTableWidget(0, 3)
+        visibility_header = CheckBoxHeader(QtCore.Qt.Orientation.Horizontal, self.LabelsTable)
+        visibility_header.checkboxClicked.connect(self._toggle_all_labels_visibility)
+        self.LabelsTable.setHorizontalHeader(visibility_header)
+        self.LabelsTable.setHorizontalHeaderLabels(["", "ROI", "Class ID"])
         self._visibility_header = visibility_header
-        self.InstanceTable.horizontalHeader().setSectionResizeMode(0, QHeaderView.Fixed)
-        self.InstanceTable.setColumnWidth(0, 32)
-        self.InstanceTable.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
-        self.InstanceTable.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
-        self.InstanceTable.verticalHeader().setVisible(False)
-        self.InstanceTable.setSelectionBehavior(QAbstractItemView.SelectRows)
-        self.InstanceTable.setSelectionMode(QAbstractItemView.ExtendedSelection)
-        self.InstanceTable.itemChanged.connect(self.on_instance_table_item_changed)
-        self.InstanceTable.itemSelectionChanged.connect(self.select_cell_from_table)
-        self.instanceBoxV.addWidget(self.InstanceTable)
+        self.LabelsTable.horizontalHeader().setSectionResizeMode(0, QHeaderView.Fixed)
+        self.LabelsTable.setColumnWidth(0, 32)
+        self.LabelsTable.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
+        self.LabelsTable.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
+        self.LabelsTable.verticalHeader().setVisible(False)
+        self.LabelsTable.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.LabelsTable.setSelectionMode(QAbstractItemView.ExtendedSelection)
+        self.LabelsTable.itemChanged.connect(self.on_labels_table_item_changed)
+        self.LabelsTable.itemSelectionChanged.connect(self.select_cell_from_labels_table)
+        self.labels_box_v.addWidget(self.LabelsTable)
 
         self.progress = QProgressBar(self)
 
@@ -605,8 +744,8 @@ class MainView(QMainWindow):
             lambda *_: self.validate_normalization_range()
         )
 
-        self.restore = None
-        self.ratio = 1.0
+        self.model.session.restore = None
+        self.model.session.ratio = 1.0
 
         return b
 
@@ -620,54 +759,10 @@ class MainView(QMainWindow):
         return self.presenter.segmentation_parameters_dict()
 
     def level_change(self, r):
-        if self.loaded:
+        if self.model.session.loaded:
             sval = self.sliders[0].value()
-            self.saturation[0][self.currentZ] = sval
+            self.model.session.saturation[0][self.model.session.current_z] = sval
             self.update_plot()
-
-    def keyPressEvent(self, event):
-        if self.loaded:
-            if not (
-                event.modifiers()
-                & (
-                    QtCore.Qt.ControlModifier
-                    | QtCore.Qt.ShiftModifier
-                    | QtCore.Qt.AltModifier
-                )
-                or self.in_stroke
-            ):
-                updated = False
-                if len(self.current_point_set) > 0:
-                    if event.key() == QtCore.Qt.Key_Return:
-                        self.add_set()
-                else:
-                    nviews = self.ViewDropDown.count() - 1
-                    nviews += int(
-                        self.ViewDropDown.model()
-                        .item(self.ViewDropDown.count() - 1)
-                        .isEnabled()
-                    )
-                    if (
-                        event.key() == QtCore.Qt.Key_Left
-                        or event.key() == QtCore.Qt.Key_A
-                    ):
-                        self.get_prev_image()
-                    elif (
-                        event.key() == QtCore.Qt.Key_Right
-                        or event.key() == QtCore.Qt.Key_D
-                    ):
-                        self.get_next_image()
-                    elif event.key() == QtCore.Qt.Key_PageDown:
-                        self.view = (self.view + 1) % (nviews)
-                        self.ViewDropDown.setCurrentIndex(self.view)
-                    elif event.key() == QtCore.Qt.Key_PageUp:
-                        self.view = (self.view - 1) % (nviews)
-                        self.ViewDropDown.setCurrentIndex(self.view)
-
-                if not updated:
-                    self.update_plot()
-        if event.key() == QtCore.Qt.Key_Minus or event.key() == QtCore.Qt.Key_Equal:
-            self.p0.keyPressEvent(event)
 
     def default_class_id(self):
         text = self.DefaultClassEdit.text().strip()
@@ -704,20 +799,7 @@ class MainView(QMainWindow):
             self.scale_on = True
 
     def enable_buttons(self):
-        self.ModelButtonC.setEnabled(True)
-        for i in range(len(self.StyleButtons)):
-            self.StyleButtons[i].setEnabled(True)
-
-        self.autoSaturationButton.setEnabled(True)
-
-        self.newmodel.setEnabled(True)
-
-        self.sliders[0].setEnabled(True)
-
-        self.toggle_mask_ops()
-
-        self.update_plot()
-        self.setWindowTitle(self.filename)
+        self.set_loaded_chrome(True)
 
     def disable_buttons_removeROIs(self):
         self.ModelButtonC.setEnabled(False)
@@ -729,12 +811,16 @@ class MainView(QMainWindow):
             self.RectSelectButton.setEnabled(False)
             if self.RectSelectButton.isChecked():
                 self.RectSelectButton.setChecked(False)
+        if hasattr(self, "DeleteSelectedButton"):
+            self.DeleteSelectedButton.setEnabled(False)
+        if hasattr(self, "EditSelectedButton"):
+            self.EditSelectedButton.setEnabled(False)
 
     def toggle_mask_ops(self):
         self.update_layer()
         self.toggle_saving()
         self.toggle_removals()
-        self.refresh_instance_table()
+        self.refresh_labels_table()
 
     def _ensure_instance_classes(self):
         self.presenter.ensure_instance_classes()
@@ -746,11 +832,11 @@ class MainView(QMainWindow):
     def set_instance_classes(self, instance_classes=None):
         self.presenter.set_instance_classes(instance_classes)
 
-    def instance_class_filter(self):
-        return self.presenter.instance_class_filter()
+    def labels_class_filter(self):
+        return self.presenter.labels_class_filter()
 
-    def instance_filter_changed(self):
-        self.presenter.on_instance_filter_changed()
+    def labels_filter_changed(self):
+        self.presenter.on_labels_filter_changed()
 
     def _ensure_instance_visible(self):
         self.presenter.ensure_instance_visible()
@@ -765,16 +851,20 @@ class MainView(QMainWindow):
     def visible_cell_pixels(self, cellpix):
         return self.presenter.visible_cell_pixels(cellpix)
 
-    def refresh_instance_table(self):
-        if not hasattr(self, "InstanceTable"):
+    def refresh_labels_table(
+        self,
+        rows: list[LabelRow] | None = None,
+        header_state: str | None = None,
+    ):
+        if not hasattr(self, "LabelsTable"):
             return
-        self._ensure_instance_classes()
-        self._ensure_instance_visible()
-        filter_class_id = self.instance_class_filter()
-        self._refreshing_instance_table = True
-        self.InstanceTable.blockSignals(True)
-        self.InstanceTable.setRowCount(self.ncells())
-        for row in range(self.ncells()):
+        if rows is None:
+            self.presenter.refresh_labels_table()
+            return
+        self._refreshing_labels_table = True
+        self.LabelsTable.blockSignals(True)
+        self.LabelsTable.setRowCount(len(rows))
+        for row_index, row in enumerate(rows):
             visible_item = QTableWidgetItem()
             visible_item.setFlags(
                 QtCore.Qt.ItemFlag.ItemIsUserCheckable
@@ -782,39 +872,38 @@ class MainView(QMainWindow):
             )
             visible_item.setCheckState(
                 QtCore.Qt.CheckState.Checked
-                if self.instance_visible[row]
+                if row.visible
                 else QtCore.Qt.CheckState.Unchecked
             )
-            roi_item = QTableWidgetItem(str(row + 1))
+            roi_item = QTableWidgetItem(str(row.roi))
             roi_item.setFlags(roi_item.flags() & ~QtCore.Qt.ItemFlag.ItemIsEditable)
-            class_item = QTableWidgetItem(str(int(self.instance_classes[row])))
-            self.InstanceTable.setItem(row, 0, visible_item)
-            self.InstanceTable.setItem(row, 1, roi_item)
-            self.InstanceTable.setItem(row, 2, class_item)
-            self.InstanceTable.setRowHidden(
-                row,
-                filter_class_id is not None
-                and int(self.instance_classes[row]) != filter_class_id,
+            class_item = QTableWidgetItem(str(row.class_id))
+            self.LabelsTable.setItem(row_index, 0, visible_item)
+            self.LabelsTable.setItem(row_index, 1, roi_item)
+            self.LabelsTable.setItem(row_index, 2, class_item)
+            self.LabelsTable.setRowHidden(row_index, row.hidden_by_filter)
+        self.LabelsTable.blockSignals(False)
+        selected_cells = [row.roi for row in rows if row.selected]
+        if selected_cells:
+            self._sync_labels_table_selection_multi(selected_cells)
+        elif not self._syncing_labels_table_selection:
+            selection_model = self.LabelsTable.selectionModel()
+            if selection_model is not None:
+                self._syncing_labels_table_selection = True
+                selection_model.blockSignals(True)
+                selection_model.clearSelection()
+                selection_model.blockSignals(False)
+                self._syncing_labels_table_selection = False
+        self._refreshing_labels_table = False
+        if header_state is not None and hasattr(self, "_visibility_header"):
+            state_map = {
+                "unchecked": QtCore.Qt.CheckState.Unchecked,
+                "checked": QtCore.Qt.CheckState.Checked,
+                "partial": QtCore.Qt.CheckState.PartiallyChecked,
+            }
+            self._visibility_header.set_check_state(
+                state_map.get(header_state, QtCore.Qt.CheckState.Unchecked)
             )
-        self.InstanceTable.blockSignals(False)
-        if self.selected_cells:
-            self._syncing_table_selection = True
-            self.InstanceTable.blockSignals(True)
-            self.InstanceTable.clearSelection()
-            for idx in self.selected_cells:
-                row = idx - 1
-                if row < self.InstanceTable.rowCount():
-                    self.InstanceTable.selectRow(row)
-            self.InstanceTable.blockSignals(False)
-            self._syncing_table_selection = False
-        elif self.selected > 0 and self.selected - 1 < self.InstanceTable.rowCount():
-            self._syncing_table_selection = True
-            self.InstanceTable.blockSignals(True)
-            self.InstanceTable.selectRow(self.selected - 1)
-            self.InstanceTable.blockSignals(False)
-            self._syncing_table_selection = False
-        self._refreshing_instance_table = False
-        self._sync_visibility_header_checkbox()
 
     def _sync_visibility_header_checkbox(self):
         if not hasattr(self, "_visibility_header"):
@@ -833,20 +922,20 @@ class MainView(QMainWindow):
             state = QtCore.Qt.CheckState.PartiallyChecked
         self._visibility_header.set_check_state(state)
 
-    def _toggle_all_instance_visibility(self, state):
-        if self._refreshing_instance_table:
+    def _toggle_all_labels_visibility(self, state):
+        if self._refreshing_labels_table:
             return
         ncells = self.ncells()
         if ncells == 0:
             return
         # Match WinUI: only explicit unchecked hides all; partial/checked show all.
         visible = state != QtCore.Qt.CheckState.Unchecked
-        self._refreshing_instance_table = True
-        self.InstanceTable.blockSignals(True)
+        self._refreshing_labels_table = True
+        self.LabelsTable.blockSignals(True)
         try:
             self.presenter.set_all_instance_visible(visible, ncells)
             for row in range(ncells):
-                item = self.InstanceTable.item(row, 0)
+                item = self.LabelsTable.item(row, 0)
                 if item is not None:
                     item.setCheckState(
                         QtCore.Qt.CheckState.Checked
@@ -854,19 +943,19 @@ class MainView(QMainWindow):
                         else QtCore.Qt.CheckState.Unchecked
                     )
         finally:
-            self.InstanceTable.blockSignals(False)
-            self._refreshing_instance_table = False
+            self.LabelsTable.blockSignals(False)
+            self._refreshing_labels_table = False
         self._sync_visibility_header_checkbox()
 
-    def on_instance_table_item_changed(self, item):
+    def on_labels_table_item_changed(self, item):
         column = item.column()
         if column == 0:
             self.set_instance_visible_from_table(item)
         elif column == 2:
-            self.set_instance_class_from_table(item)
+            self.set_instance_class_from_labels_table(item)
 
     def set_instance_visible_from_table(self, item):
-        if self._refreshing_instance_table:
+        if self._refreshing_labels_table:
             return
         row = item.row()
         self._ensure_instance_visible()
@@ -876,8 +965,8 @@ class MainView(QMainWindow):
         self.presenter.set_instance_visible_row(row, visible)
         self._sync_visibility_header_checkbox()
 
-    def set_instance_class_from_table(self, item):
-        if self._refreshing_instance_table or item.column() != 2:
+    def set_instance_class_from_labels_table(self, item):
+        if self._refreshing_labels_table or item.column() != 2:
             return
         row = item.row()
         self._ensure_instance_classes()
@@ -889,12 +978,12 @@ class MainView(QMainWindow):
             if class_id < 0:
                 raise ValueError
         except ValueError:
-            self.InstanceTable.blockSignals(True)
+            self.LabelsTable.blockSignals(True)
             item.setText(str(old_class_id))
-            self.InstanceTable.blockSignals(False)
+            self.LabelsTable.blockSignals(False)
             return
         self.presenter.set_instance_class(row, class_id)
-        if self.loaded:
+        if self.model.session.loaded:
             io._save_sets(self)
 
     def toggle_saving(self):
@@ -907,6 +996,10 @@ class MainView(QMainWindow):
             self.undo.setEnabled(True)
             if hasattr(self, "RectSelectButton"):
                 self.RectSelectButton.setEnabled(True)
+            if hasattr(self, "DeleteSelectedButton"):
+                self.DeleteSelectedButton.setEnabled(True)
+            if hasattr(self, "EditSelectedButton"):
+                self.EditSelectedButton.setEnabled(True)
         else:
             self.ClearButton.setEnabled(False)
             self.remcell.setEnabled(False)
@@ -915,13 +1008,81 @@ class MainView(QMainWindow):
                 self.RectSelectButton.setEnabled(False)
                 if self.RectSelectButton.isChecked():
                     self.RectSelectButton.setChecked(False)
+            if hasattr(self, "DeleteSelectedButton"):
+                self.DeleteSelectedButton.setEnabled(False)
+            if hasattr(self, "EditSelectedButton"):
+                self.EditSelectedButton.setEnabled(False)
 
     def remove_action(self):
-        if self.selected > 0:
-            self.remove_cell(self.selected)
+        self.delete_selected_cells()
+
+    def _selected_cell_indices(self):
+        cells = list(self.model.selection.selected_cells)
+        if not cells and self.model.selection.selected > 0:
+            cells = [self.model.selection.selected]
+        return sorted({int(idx) for idx in cells if int(idx) > 0})
+
+    def delete_selected_cells(self):
+        cells = self._selected_cell_indices()
+        if cells:
+            self.remove_cell(cells)
+
+    def edit_selected_cells(self):
+        cells = self._selected_cell_indices()
+        if not cells:
+            QMessageBox.information(self, "Edit class", "Select one or more cells first.")
+            return
+
+        self._ensure_instance_classes()
+        rows = [idx - 1 for idx in cells]
+        current_classes = [
+            int(self.instance_classes[row])
+            for row in rows
+            if 0 <= row < len(self.instance_classes)
+        ]
+        initial = (
+            str(current_classes[0])
+            if current_classes and len(set(current_classes)) == 1
+            else ""
+        )
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Edit class")
+        layout = QVBoxLayout(dialog)
+        layout.addWidget(QLabel("Class ID for selected cell(s):"))
+        class_edit = QLineEdit(initial)
+        class_edit.setValidator(
+            QtGui.QIntValidator(0, np.iinfo(np.int32).max, dialog)
+        )
+        layout.addWidget(class_edit)
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        layout.addWidget(buttons)
+        class_edit.returnPressed.connect(dialog.accept)
+
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+
+        try:
+            class_id = int(class_edit.text())
+            if class_id < 0:
+                raise ValueError
+        except ValueError:
+            QMessageBox.warning(self, "Edit class", "Enter a non-negative integer class ID.")
+            return
+
+        for idx in cells:
+            row = idx - 1
+            if row >= 0:
+                self.presenter.set_instance_class(row, class_id)
+        if self.model.session.loaded:
+            io._save_sets(self)
 
     def undo_action(self):
-        if len(self.strokes) > 0 and self.strokes[-1][0][0] == self.currentZ:
+        if len(self.model.drawing.strokes) > 0 and self.model.drawing.strokes[-1][0][0] == self.model.session.current_z:
             self.remove_stroke()
         else:
             # remove previous cell
@@ -932,40 +1093,14 @@ class MainView(QMainWindow):
         self.undo_remove_cell()
 
     def set_series_navigation_state(self, dataset=None, record_index=None):
-        self._updating_series_navigation = True
-        try:
-            enabled = dataset is not None and record_index is not None
-            self.navBox.setEnabled(enabled)
-            for axis_name, control in self.series_nav_controls.items():
-                slider = control["slider"]
-                prev_btn = control["prev_btn"]
-                next_btn = control["next_btn"]
-                if not enabled:
-                    slider.setRange(0, 0)
-                    slider.setValue(0)
-                    slider.setEnabled(False)
-                    prev_btn.setEnabled(False)
-                    next_btn.setEnabled(False)
-                    continue
-
-                axis_values = dataset["axes"][axis_name]
-                slider.setEnabled(True)
-                slider.setRange(0, max(0, len(axis_values) - 1))
-                slider.setValue(
-                    dataset["axis_index"][axis_name][
-                        dataset["records"][record_index][axis_name]
-                    ]
-                )
-                prev_btn.setEnabled(slider.maximum() > 0)
-                next_btn.setEnabled(slider.maximum() > 0)
-        finally:
-            self._updating_series_navigation = False
+        nav = self.presenter._series_nav_state(dataset, record_index)
+        self.set_series_navigation(nav)
 
     def _commit_series_slider(self, axis_name=None):
         if (
             self._updating_series_navigation
-            or self.series_dataset is None
-            or self.series_index is None
+            or self.model.series_state.dataset is None
+            or self.model.series_state.record_index is None
         ):
             return
         if axis_name is None:
@@ -979,18 +1114,7 @@ class MainView(QMainWindow):
         self.presenter.navigate_series_from_sliders(axis_name, delta)
 
     def get_files(self):
-        if self.series_dataset is not None and self.series_index is not None:
-            return (
-                [record["path"] for record in self.series_dataset["records"]],
-                self.series_index,
-            )
-        folder = os.path.dirname(self.filename)
-        mask_filter = "_masks"
-        images = get_image_files(folder, mask_filter)
-        fnames = [os.path.split(images[k])[-1] for k in range(len(images))]
-        f0 = os.path.split(self.filename)[-1]
-        idx = np.nonzero(np.array(fnames) == f0)[0][0]
-        return images, idx
+        return self.presenter.get_files()
 
     def get_prev_image(self):
         self.presenter.get_prev_image()
@@ -1019,7 +1143,7 @@ class MainView(QMainWindow):
             border=[100, 100, 100],
             invertY=True,
         )
-        self.p0.setCursor(QtCore.Qt.CrossCursor)
+        self.p0.setCursor(QtCore.Qt.CursorShape.ArrowCursor)
         self.brush_size = 1
         self.win.addItem(self.p0, 0, 0, rowspan=1, colspan=1)
         self.p0.setMenuEnabled(False)
@@ -1031,130 +1155,70 @@ class MainView(QMainWindow):
         self.scale = pg.ImageItem(viewbox=self.p0, parent=self)
         self.scale.setLevels([0, 255])
         self.p0.scene().contextMenuItem = self.p0
-        self.Ly, self.Lx = 512, 512
+        self.model.session.ly, self.model.session.lx = 512, 512
         self.p0.addItem(self.img)
         self.p0.addItem(self.layer)
         self.p0.addItem(self.scale)
         self.selection_box = None
+        self.rect_select_preview = None
 
     def reset(self):
-        # ---- start sets of points ---- #
-        self.selected = 0
-        self.nchan = 3
-        self.loaded = False
-        self.channel = [0, 1]
-        self.current_point_set = []
-        self.in_stroke = False
-        self.strokes = []
-        self.stroke_appended = True
-        self.brush_mode = False
-        if hasattr(self, "BrushButton"):
-            self.BrushButton.setChecked(False)
-        self.resize = False
-        self.ncells_counter.reset()
-        self.zdraw = []
-        self.removed_cell = []
-        self.cellcolors = np.array([255, 255, 255])[np.newaxis, :]
+        self.presenter.reset_session()
 
-        # -- zero out image stack -- #
-        self.opacity = 128  # how opaque masks should be
-        self.outcolor = [200, 200, 255, 200]
-        self.NZ, self.Ly, self.Lx = 1, 256, 256
-        self.saturation = [[[0, 255] for n in range(self.NZ)]]
+    def clear_all(self):
+        self.presenter.clear_all()
 
-        self.sliders[0].setValue([0, 255])
-        self.sliders[0].setEnabled(False)
-        self.sliders[0].show()
-        self.currentZ = 0
-        self.flows = [[], [], [], [], [[]]]
-        # masks matrix
-        # image matrix with a scale disk
-        self.stack = np.zeros((1, self.Ly, self.Lx, 3))
-        self.Lyr, self.Lxr = self.Ly, self.Lx
-        self.Ly0, self.Lx0 = self.Ly, self.Lx
-        self.radii = 0 * np.ones((self.Ly, self.Lx, 4), np.uint8)
-        self.layerz = 0 * np.ones((self.Ly, self.Lx, 4), np.uint8)
-        self.cellpix = np.zeros((1, self.Ly, self.Lx), np.uint16)
-        self.outpix = np.zeros((1, self.Ly, self.Lx), np.uint16)
-        self.ismanual = np.zeros(0, "bool")
-        self.presenter.reset_instance_metadata()
+    def draw_layer(self):
+        self.presenter.refresh_mask_layer()
 
-        # -- set menus to default -- #
-        self.view = 0
-        self.ViewDropDown.setCurrentIndex(0)
-        self.ViewDropDown.model().item(self.ViewDropDown.count() - 1).setEnabled(False)
-        self.delete_restore()
+    def update_layer(self):
+        self.presenter.refresh_mask_layer()
 
-        self.deleting_multiple = False
-        self.removing_cells_list = []
-        self.removing_region = False
-        self.remove_roi_obj = None
-        self.rect_select_mode = False
-        self.selected_cells = []
-        self.rect_select_preview = None
-        self._rect_select_start = None
+    def compute_saturation(self):
+        self.presenter.compute_saturation()
 
-        self.clear_all()
+    def get_segmentation_parameters(self):
+        return self.presenter.segmentation_parameters_dict()
 
-        self.filename = []
-        self.presenter.reset_series()
-        self.loaded = False
-        self.recompute_masks = False
+    def get_normalize_params(self):
+        return self.presenter.get_normalize_params()
 
-        self.autoSaturationButton.setEnabled(False)
+    def set_normalize_params(self, normalize_params):
+        self.presenter.set_normalize_params(normalize_params)
+
+    def initialize_model(self, model_name=None, custom=False):
+        self.presenter.initialize_model(model_name=model_name, custom=custom)
+
+    def add_model(self):
+        self.presenter.add_model()
+
+    def remove_model(self):
+        self.presenter.remove_model()
+
+    def new_model(self):
+        self.presenter.train_new_model()
 
     def delete_restore(self):
-        """delete restored imgs but don't reset settings"""
         self.model.discard_filtered_stack()
 
     def clear_restore(self):
-        """delete restored imgs and reset settings"""
         print("GUI_INFO: clearing restored image")
-        self.ViewDropDown.model().item(self.ViewDropDown.count() - 1).setEnabled(False)
-        if self.ViewDropDown.currentIndex() == self.ViewDropDown.count() - 1:
-            self.ViewDropDown.setCurrentIndex(0)
+        self.set_view_mode(0, restored_enabled=False)
         self.delete_restore()
-        self.restore = None
-        self.ratio = 1.0
+        self.model.session.restore = None
+        self.model.session.ratio = 1.0
         self.set_normalize_params(self.get_normalize_params())
 
-    def clear_all(self):
-        self.prev_selected = 0
-        self.selected = 0
-        self.selected_cells = []
-        if self.restore and "upsample" in self.restore:
-            self.layerz = 0 * np.ones((self.Lyr, self.Lxr, 4), np.uint8)
-            self.cellpix = np.zeros((self.NZ, self.Lyr, self.Lxr), np.uint16)
-            self.outpix = np.zeros((self.NZ, self.Lyr, self.Lxr), np.uint16)
-            self.cellpix_resize = self.cellpix.copy()
-            self.outpix_resize = self.outpix.copy()
-            self.cellpix_orig = np.zeros((self.NZ, self.Ly0, self.Lx0), np.uint16)
-            self.outpix_orig = np.zeros((self.NZ, self.Ly0, self.Lx0), np.uint16)
-        else:
-            self.layerz = 0 * np.ones((self.Ly, self.Lx, 4), np.uint8)
-            self.cellpix = np.zeros((self.NZ, self.Ly, self.Lx), np.uint16)
-            self.outpix = np.zeros((self.NZ, self.Ly, self.Lx), np.uint16)
-
-        self.cellcolors = np.array([255, 255, 255])[np.newaxis, :]
-        self.presenter.reset_instance_metadata()
-        self.ncells_counter.reset()
-        self.toggle_removals()
-        self.update_scale()
-        self.update_layer()
-        self.refresh_instance_table()
-        self._clear_selection_boxes()
-        self._clear_rect_select_preview()
-
     def _cell_bounds(self, idx, margin=2):
-        cellpix = self.cellpix[self.currentZ]
+        cellpix = self.model.session.cellpix[self.model.session.current_z]
         mask = cellpix == idx
         if not np.any(mask):
             return None
         ar, ac = np.nonzero(mask)
         y0 = max(0, int(ar.min()) - margin)
-        y1 = min(self.Ly - 1, int(ar.max()) + margin)
+        y1 = min(self.model.session.ly - 1, int(ar.max()) + margin)
         x0 = max(0, int(ac.min()) - margin)
-        x1 = min(self.Lx - 1, int(ac.max()) + margin)
+        x1 = min(self.model.session.lx - 1, int(ac.max()) + margin)
         return x0, y0, x1, y1
 
     def _ensure_selection_box(self):
@@ -1173,12 +1237,12 @@ class MainView(QMainWindow):
             self.selection_box.setData([], [])
 
     def _update_selection_boxes(self):
-        if not self.loaded:
+        if not self.model.session.loaded:
             self._clear_selection_boxes()
             return
 
-        indices = self.selected_cells if self.selected_cells else (
-            [self.selected] if self.selected > 0 else []
+        indices = self.model.selection.selected_cells if self.model.selection.selected_cells else (
+            [self.model.selection.selected] if self.model.selection.selected > 0 else []
         )
         if not indices:
             self._clear_selection_boxes()
@@ -1199,7 +1263,11 @@ class MainView(QMainWindow):
             return
 
         self._ensure_selection_box()
-        self.selection_box.setData(xs[:-1], ys[:-1])
+        self.selection_box.setData(
+            np.array(xs[:-1], dtype=float),
+            np.array(ys[:-1], dtype=float),
+            connect="finite",
+        )
 
     def _ensure_rect_select_preview(self):
         if self.rect_select_preview is None:
@@ -1219,10 +1287,10 @@ class MainView(QMainWindow):
     def _normalize_rect(self, x0, y0, x1, y1):
         x0, x1 = sorted([int(x0), int(x1)])
         y0, y1 = sorted([int(y0), int(y1)])
-        x0 = max(0, min(self.Lx - 1, x0))
-        x1 = max(0, min(self.Lx, x1))
-        y0 = max(0, min(self.Ly - 1, y0))
-        y1 = max(0, min(self.Ly, y1))
+        x0 = max(0, min(self.model.session.lx - 1, x0))
+        x1 = max(0, min(self.model.session.lx, x1))
+        y0 = max(0, min(self.model.session.ly - 1, y0))
+        y1 = max(0, min(self.model.session.ly, y1))
         if x1 <= x0 or y1 <= y0:
             return None
         return x0, y0, x1, y1
@@ -1239,240 +1307,275 @@ class MainView(QMainWindow):
         self.rect_select_preview.setData(xs, ys)
 
     def _cells_fully_in_rect(self, x0, y0, x1, y1):
-        bounds = self._normalize_rect(x0, y0, x1, y1)
-        if bounds is None:
-            return []
-        x0, y0, x1, y1 = bounds
-        cellpix = self.cellpix[self.currentZ]
-        candidates = np.unique(cellpix[y0:y1, x0:x1])
-        candidates = np.trim_zeros(candidates)
-        filter_class_id = self.instance_class_filter()
-        self._ensure_instance_classes()
-        fully_covered = []
-        for idx in candidates:
-            ar, ac = np.nonzero(cellpix == idx)
-            if ar.min() < y0 or ar.max() >= y1 or ac.min() < x0 or ac.max() >= x1:
-                continue
-            row = int(idx) - 1
-            if filter_class_id is not None:
-                if row >= len(self.instance_classes) or int(
-                    self.instance_classes[row]
-                ) != filter_class_id:
-                    continue
-            fully_covered.append(int(idx))
-        return sorted(fully_covered)
+        return self.model.cells_in_rect(
+            x0,
+            y0,
+            x1,
+            y1,
+            filter_class_id=self.labels_class_filter(),
+        )
 
-    def _sync_instance_table_selection(self, idx):
-        if not hasattr(self, "InstanceTable") or idx - 1 >= self.InstanceTable.rowCount():
+    def _sync_labels_table_selection(self, idx):
+        if not hasattr(self, "LabelsTable") or idx - 1 >= self.LabelsTable.rowCount():
             return
-        self._sync_instance_table_selection_multi([idx])
+        self._sync_labels_table_selection_multi([idx])
 
-    def _sync_instance_table_selection_multi(self, indices):
-        if not hasattr(self, "InstanceTable"):
+    def _sync_labels_table_selection_multi(self, indices):
+        if not hasattr(self, "LabelsTable"):
             return
-        self._syncing_table_selection = True
-        self.InstanceTable.blockSignals(True)
-        self.InstanceTable.clearSelection()
+        selection_model = self.LabelsTable.selectionModel()
+        if selection_model is None:
+            return
+
+        self._syncing_labels_table_selection = True
+        selection_model.blockSignals(True)
+        selection_model.clearSelection()
         for idx in indices:
-            row = idx - 1
-            if row < self.InstanceTable.rowCount():
-                self.InstanceTable.selectRow(row)
-        self.InstanceTable.blockSignals(False)
-        self._syncing_table_selection = False
+            row = int(idx) - 1
+            if 0 <= row < self.LabelsTable.rowCount():
+                index = self.LabelsTable.model().index(row, 0)
+                selection_model.select(
+                    index,
+                    QtCore.QItemSelectionModel.SelectionFlag.Select
+                    | QtCore.QItemSelectionModel.SelectionFlag.Rows,
+                )
+        selection_model.blockSignals(False)
+        self._syncing_labels_table_selection = False
+
+        if indices:
+            first_row = int(indices[0]) - 1
+            if 0 <= first_row < self.LabelsTable.rowCount():
+                item = self.LabelsTable.item(first_row, 0)
+                if item is not None:
+                    self.LabelsTable.scrollToItem(
+                        item,
+                        QAbstractItemView.ScrollHint.EnsureVisible,
+                    )
 
     def _apply_cell_selection(self, cells):
-        self.selected_cells = cells
-        self.selected = cells[0] if cells else 0
-        self.prev_selected = self.selected
-        self._sync_instance_table_selection_multi(cells)
+        self.model.selection.selected_cells = cells
+        self.model.selection.selected = cells[0] if cells else 0
+        self.model.selection.prev_selected = self.model.selection.selected
+        self._sync_labels_table_selection_multi(cells)
         self._update_selection_boxes()
 
+    def _update_canvas_cursor(self):
+        if not hasattr(self, "p0"):
+            return
+        if not self.model.session.loaded:
+            cursor = QtGui.QCursor(QtCore.Qt.CursorShape.ArrowCursor)
+        elif self.model.drawing.brush_mode:
+            cursor = brush_cursor()
+        elif self.rect_select_mode:
+            cursor = select_cursor()
+        else:
+            cursor = QtGui.QCursor(QtCore.Qt.CursorShape.ArrowCursor)
+        self.p0.setCursor(cursor)
+        self.win.setCursor(cursor)
+
     def toggle_brush_mode(self, enabled):
-        self.brush_mode = enabled
-        if enabled or not self.in_stroke:
+        if enabled and self.rect_select_mode:
+            self.RectSelectButton.setChecked(False)
+        self.model.drawing.brush_mode = enabled
+        self._update_canvas_cursor()
+        if enabled or not self.model.drawing.in_stroke:
             return
 
         if hasattr(self.layer, "scatter"):
             self.p0.removeItem(self.layer.scatter)
-        self.in_stroke = False
-        self.current_stroke = []
-        self.stroke_appended = True
-        self.draw_layer()
+        drawing = self.model.drawing
+        drawing.in_stroke = False
+        drawing.current_stroke = []
+        drawing.stroke_appended = True
+        self.presenter.refresh_mask_layer()
 
     def toggle_rect_select_mode(self, enabled):
+        if enabled and self.model.drawing.brush_mode:
+            self.BrushButton.setChecked(False)
         self.rect_select_mode = enabled
-        self.p0.setMouseEnabled(x=not enabled, y=not enabled)
         if not enabled:
             self._rect_select_start = None
+            self._rect_select_dragging = False
             self._clear_rect_select_preview()
+        self._update_canvas_cursor()
+
+    def _canvas_view(self):
+        views = self.win.scene().views()
+        return views[0] if views else None
+
+    def _canvas_viewport(self):
+        view = self._canvas_view()
+        return view.viewport() if view is not None else None
+
+    def _view_pos_from_viewport_event(self, event):
+        view = self._canvas_view()
+        if view is None:
+            return None
+        scene_pos = view.mapToScene(event.position().toPoint())
+        return self.p0.mapSceneToView(scene_pos)
 
     def eventFilter(self, obj, event):
         if (
-            obj is self.win.scene()
+            obj is self._canvas_viewport()
             and self.rect_select_mode
-            and self.loaded
-            and not self.removing_region
-            and not self.deleting_multiple
+            and self.model.session.loaded
+            and not self.model.selection.removing_region
+            and not self.model.selection.deleting_multiple
         ):
             event_type = event.type()
             if (
                 event_type == QtCore.QEvent.Type.MouseButtonPress
-                and event.button() == QtCore.Qt.LeftButton
+                and event.button() == QtCore.Qt.MouseButton.LeftButton
             ):
-                self.begin_rect_select(self.p0.mapSceneToView(event.scenePos()))
+                pos = self._view_pos_from_viewport_event(event)
+                if pos is not None:
+                    self.begin_rect_select(pos)
                 return True
             if (
                 event_type == QtCore.QEvent.Type.MouseMove
-                and event.buttons() & QtCore.Qt.LeftButton
+                and event.buttons() & QtCore.Qt.MouseButton.LeftButton
                 and self._rect_select_start is not None
             ):
-                self.update_rect_select(self.p0.mapSceneToView(event.scenePos()))
+                pos = self._view_pos_from_viewport_event(event)
+                if pos is not None:
+                    self.update_rect_select(pos)
                 return True
             if (
                 event_type == QtCore.QEvent.Type.MouseButtonRelease
-                and event.button() == QtCore.Qt.LeftButton
+                and event.button() == QtCore.Qt.MouseButton.LeftButton
                 and self._rect_select_start is not None
             ):
-                self.finish_rect_select(self.p0.mapSceneToView(event.scenePos()))
+                pos = self._view_pos_from_viewport_event(event)
+                if pos is not None:
+                    self.finish_rect_select(pos, event.modifiers())
                 return True
         return super().eventFilter(obj, event)
 
     def begin_rect_select(self, pos):
         self._rect_select_start = (int(pos.y()), int(pos.x()))
+        self._rect_select_dragging = False
 
     def update_rect_select(self, pos):
         if self._rect_select_start is None:
             return
         y0, x0 = self._rect_select_start
         y1, x1 = int(pos.y()), int(pos.x())
+        if not self._rect_select_dragging:
+            if (
+                max(abs(y1 - y0), abs(x1 - x0))
+                < self._rect_select_drag_threshold
+            ):
+                return
+            self._rect_select_dragging = True
         self._set_rect_preview(x0, y0, x1, y1)
 
-    def finish_rect_select(self, pos):
+    def finish_rect_select(self, pos, modifiers=QtCore.Qt.KeyboardModifier.NoModifier):
         if self._rect_select_start is None:
             return
         y0, x0 = self._rect_select_start
         y1, x1 = int(pos.y()), int(pos.x())
+        dragging = self._rect_select_dragging
+        additive = bool(modifiers & QtCore.Qt.KeyboardModifier.ShiftModifier)
         self._rect_select_start = None
+        self._rect_select_dragging = False
         self._clear_rect_select_preview()
-        cells = self._cells_fully_in_rect(x0, y0, x1, y1)
-        self._apply_cell_selection(cells)
+        if dragging:
+            cells = self._cells_fully_in_rect(x0, y0, x1, y1)
+            if additive:
+                cells = sorted(
+                    set(self.model.selection.selected_cells) | set(cells)
+                )
+            self._apply_cell_selection(cells)
+        else:
+            self._select_cell_at_click(y1, x1, additive=additive)
+
+    def _select_cell_at_click(self, y, x, additive=False):
+        session = self.model.session
+        if y < 0 or y >= session.ly or x < 0 or x >= session.lx:
+            return
+        idx = int(session.cellpix[session.current_z, y, x])
+        if idx > 0:
+            if additive:
+                cells = list(self.model.selection.selected_cells)
+                if idx not in cells:
+                    cells.append(idx)
+                self._apply_cell_selection(sorted(cells))
+            else:
+                self.select_cell(idx)
+        elif not additive:
+            self.unselect_cell()
 
     def select_cell(self, idx):
-        self.prev_selected = self.selected
-        self.selected = idx
-        self.selected_cells = [idx] if idx > 0 else []
-        if self.selected > 0:
-            self._sync_instance_table_selection(idx)
+        self.model.selection.prev_selected = self.model.selection.selected
+        self.model.selection.selected = idx
+        self.model.selection.selected_cells = [idx] if idx > 0 else []
+        if self.model.selection.selected > 0:
+            self._sync_labels_table_selection(idx)
             self._update_selection_boxes()
         else:
             self._clear_selection_boxes()
 
-    def select_cell_from_table(self):
-        if self._refreshing_instance_table or self._syncing_table_selection:
+    def select_cell_from_labels_table(self):
+        if self._refreshing_labels_table or self._syncing_labels_table_selection:
             return
-        selected_rows = self.InstanceTable.selectionModel().selectedRows()
+        selected_rows = self.LabelsTable.selectionModel().selectedRows()
         if not selected_rows:
-            if self.selected > 0 or self.selected_cells:
-                self.selected = 0
-                self.selected_cells = []
+            if self.model.selection.selected > 0 or self.model.selection.selected_cells:
+                self.model.selection.selected = 0
+                self.model.selection.selected_cells = []
                 self._clear_selection_boxes()
             return
         cells = sorted({row.row() + 1 for row in selected_rows})
-        if cells == self.selected_cells:
+        if cells == self.model.selection.selected_cells:
             self._update_selection_boxes()
             return
-        self.prev_selected = self.selected
-        self.selected_cells = cells
-        self.selected = cells[0] if cells else 0
+        self.model.selection.prev_selected = self.model.selection.selected
+        self.model.selection.selected_cells = cells
+        self.model.selection.selected = cells[0] if cells else 0
         self._update_selection_boxes()
 
     def select_cell_multi(self, idx):
         if idx > 0:
-            z = self.currentZ
-            self.layerz[self.cellpix[z] == idx] = np.array(
-                [255, 255, 255, self.opacity]
+            z = self.model.session.current_z
+            self.model.session.layerz[self.model.session.cellpix[z] == idx] = np.array(
+                [255, 255, 255, self.model.session.opacity]
             )
             self.update_layer()
 
     def unselect_cell(self):
-        self.selected = 0
-        self.selected_cells = []
+        self.model.selection.selected = 0
+        self.model.selection.selected_cells = []
         self._clear_selection_boxes()
-        if hasattr(self, "InstanceTable"):
-            self._syncing_table_selection = True
-            self.InstanceTable.blockSignals(True)
-            self.InstanceTable.clearSelection()
-            self.InstanceTable.blockSignals(False)
-            self._syncing_table_selection = False
+        if hasattr(self, "LabelsTable"):
+            selection_model = self.LabelsTable.selectionModel()
+            if selection_model is not None:
+                self._syncing_labels_table_selection = True
+                selection_model.blockSignals(True)
+                selection_model.clearSelection()
+                selection_model.blockSignals(False)
+                self._syncing_labels_table_selection = False
 
     def unselect_cell_multi(self, idx):
-        z = self.currentZ
-        self.layerz[self.cellpix[z] == idx] = np.append(
-            self.cellcolors[idx], self.opacity
+        z = self.model.session.current_z
+        self.model.session.layerz[self.model.session.cellpix[z] == idx] = np.append(
+            self.model.session.cellcolors[idx], self.model.session.opacity
         )
-        self.layerz[self.outpix[z] == idx] = np.array(self.outcolor).astype(np.uint8)
+        self.model.session.layerz[self.model.session.outpix[z] == idx] = np.array(self.model.session.outcolor).astype(np.uint8)
         self.update_layer()
 
     def remove_cell(self, idx):
         self.presenter.remove_cell(idx)
 
     def remove_single_cell(self, idx):
-        # remove from manual array
-        self.selected = 0
-        self.selected_cells = []
-        removed_class_id = 0
-        removed_visible = True
-        self._ensure_instance_classes()
-        self._ensure_instance_visible()
-        removed_class_id, removed_visible = self.presenter.remove_instance_metadata(
-            idx - 1
-        )
-        if self.NZ > 1:
-            zextent = ((self.cellpix == idx).sum(axis=(1, 2)) > 0).nonzero()[0]
-        else:
-            zextent = [0]
-        for z in zextent:
-            cp = self.cellpix[z] == idx
-            op = self.outpix[z] == idx
-            # remove from self.cellpix and self.outpix
-            self.cellpix[z, cp] = 0
-            self.outpix[z, op] = 0
-            if z == self.currentZ:
-                # remove from mask layer
-                self.layerz[cp] = np.array([0, 0, 0, 0])
-
-        # reduce other pixels by -1
-        self.cellpix[self.cellpix > idx] -= 1
-        self.outpix[self.outpix > idx] -= 1
-
-        if self.NZ == 1:
-            self.removed_cell = [
-                self.ismanual[idx - 1],
-                self.cellcolors[idx],
-                np.nonzero(cp),
-                np.nonzero(op),
-                removed_class_id,
-                removed_visible,
-            ]
-            self.redo.setEnabled(True)
-            ar, ac = self.removed_cell[2]
-            d = datetime.datetime.now()
-            self.track_changes.append(
-                [d.strftime("%m/%d/%Y, %H:%M:%S"), "removed mask", [ar, ac]]
-            )
-        # remove cell from lists
-        self.ismanual = np.delete(self.ismanual, idx - 1)
-        self.cellcolors = np.delete(self.cellcolors, [idx], axis=0)
-        del self.zdraw[idx - 1]
-        print("GUI_INFO: removed cell %d" % (idx - 1))
+        self.presenter.remove_cell(idx)
 
     def remove_region_cells(self):
-        if self.removing_cells_list:
-            for idx in self.removing_cells_list:
+        if self.model.selection.removing_cells_list:
+            for idx in self.model.selection.removing_cells_list:
                 self.unselect_cell_multi(idx)
-            self.removing_cells_list.clear()
+            self.model.selection.removing_cells_list.clear()
         self.disable_buttons_removeROIs()
-        self.removing_region = True
+        self.model.selection.removing_region = True
 
         self.clear_multi_selected_cells()
 
@@ -1495,18 +1598,18 @@ class MainView(QMainWindow):
     def delete_multiple_cells(self):
         self.unselect_cell()
         self.disable_buttons_removeROIs()
-        self.deleting_multiple = True
+        self.model.selection.deleting_multiple = True
 
     def done_remove_multiple_cells(self):
-        self.deleting_multiple = False
-        self.removing_region = False
+        self.model.selection.deleting_multiple = False
+        self.model.selection.removing_region = False
 
-        if self.removing_cells_list:
-            self.removing_cells_list = list(set(self.removing_cells_list))
-            display_remove_list = [i - 1 for i in self.removing_cells_list]
+        if self.model.selection.removing_cells_list:
+            self.model.selection.removing_cells_list = list(set(self.model.selection.removing_cells_list))
+            display_remove_list = [i - 1 for i in self.model.selection.removing_cells_list]
             print(f"GUI_INFO: removing cells: {display_remove_list}")
-            self.remove_cell(self.removing_cells_list)
-            self.removing_cells_list.clear()
+            self.remove_cell(self.model.selection.removing_cells_list)
+            self.model.selection.removing_cells_list.clear()
             self.unselect_cell()
         self.enable_buttons()
 
@@ -1514,101 +1617,27 @@ class MainView(QMainWindow):
             self.remove_roi(self.remove_roi_obj)
 
     def merge_cells(self, idx):
-        self.prev_selected = self.selected
-        self.selected = idx
-        if self.selected != self.prev_selected:
-            for z in range(self.NZ):
-                ar0, ac0 = np.nonzero(self.cellpix[z] == self.prev_selected)
-                ar1, ac1 = np.nonzero(self.cellpix[z] == self.selected)
-                touching = np.logical_and(
-                    (ar0[:, np.newaxis] - ar1) < 3, (ac0[:, np.newaxis] - ac1) < 3
-                ).sum()
-                ar = np.hstack((ar0, ar1))
-                ac = np.hstack((ac0, ac1))
-                vr0, vc0 = np.nonzero(self.outpix[z] == self.prev_selected)
-                vr1, vc1 = np.nonzero(self.outpix[z] == self.selected)
-                self.outpix[z, vr0, vc0] = 0
-                self.outpix[z, vr1, vc1] = 0
-                if touching > 0:
-                    mask = np.zeros((np.ptp(ar) + 4, np.ptp(ac) + 4), np.uint8)
-                    mask[ar - ar.min() + 2, ac - ac.min() + 2] = 1
-                    contours = cv2.findContours(
-                        mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE
-                    )
-                    pvc, pvr = contours[-2][0].squeeze().T
-                    vr, vc = pvr + ar.min() - 2, pvc + ac.min() - 2
-
-                else:
-                    vr = np.hstack((vr0, vr1))
-                    vc = np.hstack((vc0, vc1))
-                color = self.cellcolors[self.prev_selected]
-                self.draw_mask(z, ar, ac, vr, vc, color, idx=self.prev_selected)
-            self.remove_cell(self.selected)
-            print("GUI_INFO: merged two cells")
-            self.update_layer()
-            io._save_sets(self)
-            self.undo.setEnabled(False)
-            self.redo.setEnabled(False)
+        self.presenter.merge_cells(idx)
 
     def undo_remove_cell(self):
-        if len(self.removed_cell) > 0:
-            z = 0
-            ar, ac = self.removed_cell[2]
-            vr, vc = self.removed_cell[3]
-            color = self.removed_cell[1]
-            self.draw_mask(z, ar, ac, vr, vc, color)
-            self.toggle_mask_ops()
-            self.cellcolors = np.append(self.cellcolors, color[np.newaxis, :], axis=0)
-            self.ismanual = np.append(self.ismanual, self.removed_cell[0])
-            class_id = self.removed_cell[4] if len(self.removed_cell) > 4 else 0
-            visible = self.removed_cell[5] if len(self.removed_cell) > 5 else True
-            self.presenter.append_instance_metadata(class_id, visible)
-            self.ncells_counter += 1
-            self.zdraw.append([])
-            print(">>> added back removed cell")
-            self.update_layer()
-            io._save_sets(self)
-            self.removed_cell = []
-            self.redo.setEnabled(False)
+        self.presenter.undo_remove_cell()
 
     def remove_stroke(self, delete_points=True, stroke_ind=-1):
-        stroke = np.array(self.strokes[stroke_ind])
-        cZ = self.currentZ
-        inZ = stroke[0, 0] == cZ
-        if inZ:
-            outpix = self.outpix[cZ, stroke[:, 1], stroke[:, 2]] > 0
-            self.layerz[stroke[~outpix, 1], stroke[~outpix, 2]] = np.array([0, 0, 0, 0])
-            cellpix = self.cellpix[cZ, stroke[:, 1], stroke[:, 2]]
-            ccol = self.cellcolors.copy()
-            if self.selected > 0:
-                ccol[self.selected] = np.array([255, 255, 255])
-            col2mask = ccol[cellpix]
-            col2mask = np.concatenate(
-                (col2mask, self.opacity * (cellpix[:, np.newaxis] > 0)), axis=-1
-            )
-            self.layerz[stroke[:, 1], stroke[:, 2], :] = col2mask
-            self.layerz[stroke[outpix, 1], stroke[outpix, 2]] = np.array(
-                self.outcolor
-            )
-            if delete_points:
-                del self.current_point_set[stroke_ind]
-            self.update_layer()
-
-        del self.strokes[stroke_ind]
+        self.presenter.remove_stroke(delete_points=delete_points, stroke_ind=stroke_ind)
 
     def plot_clicked(self, event):
         if (
             event.button() == QtCore.Qt.LeftButton
             and not event.modifiers()
             & (QtCore.Qt.ShiftModifier | QtCore.Qt.AltModifier)
-            and not self.removing_region
+            and not self.model.selection.removing_region
         ):
             if event.double():
                 try:
-                    self.p0.setYRange(0, self.Ly + self.pr)
+                    self.p0.setYRange(0, self.model.session.ly + self.pr)
                 except:
-                    self.p0.setYRange(0, self.Ly)
-                self.p0.setXRange(0, self.Lx)
+                    self.p0.setYRange(0, self.model.session.ly)
+                self.p0.setXRange(0, self.model.session.lx)
 
     def cancel_remove_multiple(self):
         self.clear_multi_selected_cells()
@@ -1616,9 +1645,9 @@ class MainView(QMainWindow):
 
     def clear_multi_selected_cells(self):
         # unselect all previously selected cells:
-        for idx in self.removing_cells_list:
+        for idx in self.model.selection.removing_cells_list:
             self.unselect_cell_multi(idx)
-        self.removing_cells_list.clear()
+        self.model.selection.removing_cells_list.clear()
 
     def add_roi(self, roi):
         self.p0.addItem(roi)
@@ -1629,7 +1658,7 @@ class MainView(QMainWindow):
         assert roi == self.remove_roi_obj
         self.remove_roi_obj = None
         self.p0.removeItem(roi)
-        self.removing_region = False
+        self.model.selection.removing_region = False
 
     def roi_changed(self, roi):
         # find the overlapping cells and make them selected
@@ -1643,20 +1672,20 @@ class MainView(QMainWindow):
             x0 = 0
         if y0 < 0:
             y0 = 0
-        if x1 > self.Lx:
-            x1 = self.Lx
-        if y1 > self.Ly:
-            y1 = self.Ly
+        if x1 > self.model.session.lx:
+            x1 = self.model.session.lx
+        if y1 > self.model.session.ly:
+            y1 = self.model.session.ly
 
         # find cells in that region
-        cell_idxs = np.unique(self.cellpix[self.currentZ, y0:y1, x0:x1])
+        cell_idxs = np.unique(self.model.session.cellpix[self.model.session.current_z, y0:y1, x0:x1])
         cell_idxs = np.trim_zeros(cell_idxs)
         # deselect cells not in region by deselecting all and then selecting the ones in the region
         self.clear_multi_selected_cells()
 
         for idx in cell_idxs:
             self.select_cell_multi(idx)
-            self.removing_cells_list.append(idx)
+            self.model.selection.removing_cells_list.append(idx)
 
         self.update_layer()
 
@@ -1665,20 +1694,20 @@ class MainView(QMainWindow):
 
     def update_plot(self):
         self.view = self.ViewDropDown.currentIndex()
-        self.Ly, self.Lx, _ = self.stack[self.currentZ].shape
+        self.model.session.ly, self.model.session.lx, _ = self.model.session.stack[self.model.session.current_z].shape
 
         if self.view == 0 or self.view == self.ViewDropDown.count() - 1:
             image = (
-                self.stack[self.currentZ]
+                self.model.session.stack[self.model.session.current_z]
                 if self.view == 0
-                else self.stack_filtered[self.currentZ]
+                else self.model.session.stack_filtered[self.model.session.current_z]
             )
             self.img.setImage(as_gray_image(image), autoLevels=False, lut=None)
-            self.img.setLevels(self.saturation[0][self.currentZ])
+            self.img.setLevels(self.model.session.saturation[0][self.model.session.current_z])
         else:
-            image = np.zeros((self.Ly, self.Lx), np.uint8)
-            if len(self.flows) >= self.view - 1 and len(self.flows[self.view - 1]) > 0:
-                image = self.flows[self.view - 1][self.currentZ]
+            image = np.zeros((self.model.session.ly, self.model.session.lx), np.uint8)
+            if len(self.model.session.flows) >= self.view - 1 and len(self.model.session.flows[self.view - 1]) > 0:
+                image = self.model.session.flows[self.view - 1][self.model.session.current_z]
             if self.view > 1:
                 self.img.setImage(as_gray_image(image), autoLevels=False, lut=self.bwr)
             else:
@@ -1687,15 +1716,15 @@ class MainView(QMainWindow):
 
         self.sliders[0].setValue(
             [
-                self.saturation[0][self.currentZ][0],
-                self.saturation[0][self.currentZ][1],
+                self.model.session.saturation[0][self.model.session.current_z][0],
+                self.model.session.saturation[0][self.model.session.current_z][1],
             ]
         )
         self.win.show()
         self.show()
 
     def update_layer(self):
-        self.layer.setImage(self.layerz, autoLevels=False)
+        self.layer.setImage(self.model.session.layerz, autoLevels=False)
         self._update_selection_boxes()
         self.win.show()
         self.show()
@@ -1704,371 +1733,20 @@ class MainView(QMainWindow):
         self.presenter.add_set()
 
     def add_mask(self, points=None, color=(100, 200, 50), dense=True):
-        # points is list of strokes
-        points_all = np.concatenate(points, axis=0)
+        from .presenter_masks import add_mask_from_points
 
-        # loop over z values
-        median = []
-        zdraw = np.unique(points_all[:, 0])
-        z = 0
-        ars, acs, vrs, vcs = (
-            np.zeros(0, "int"),
-            np.zeros(0, "int"),
-            np.zeros(0, "int"),
-            np.zeros(0, "int"),
-        )
-        for stroke in points:
-            stroke = np.concatenate(stroke, axis=0).reshape(-1, 4)
-            vr = stroke[:, 1]
-            vc = stroke[:, 2]
-            # get points inside drawn points
-            mask = np.zeros((np.ptp(vr) + 4, np.ptp(vc) + 4), np.uint8)
-            pts = np.stack((vc - vc.min() + 2, vr - vr.min() + 2), axis=-1)[
-                :, np.newaxis, :
-            ]
-            mask = cv2.fillPoly(mask, [pts], (255, 0, 0))
-            ar, ac = np.nonzero(mask)
-            ar, ac = ar + vr.min() - 2, ac + vc.min() - 2
-            # get dense outline
-            contours = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
-            pvc, pvr = contours[-2][0][:, 0].T
-            vr, vc = pvr + vr.min() - 2, pvc + vc.min() - 2
-            # concatenate all points
-            ar, ac = np.hstack((np.vstack((vr, vc)), np.vstack((ar, ac))))
-            # if these pixels are overlapping with another cell, reassign them
-            ioverlap = self.cellpix[z][ar, ac] > 0
-            if (~ioverlap).sum() < 10:
-                print("GUI_ERROR: cell < 10 pixels without overlaps, not drawn")
-                return None
-            elif ioverlap.sum() > 0:
-                ar, ac = ar[~ioverlap], ac[~ioverlap]
-                # compute outline of new mask
-                mask = np.zeros((np.ptp(vr) + 4, np.ptp(vc) + 4), np.uint8)
-                mask[ar - vr.min() + 2, ac - vc.min() + 2] = 1
-                contours = cv2.findContours(
-                    mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE
-                )
-                pvc, pvr = contours[-2][0][:, 0].T
-                vr, vc = pvr + vr.min() - 2, pvc + vc.min() - 2
-            ars = np.concatenate((ars, ar), axis=0)
-            acs = np.concatenate((acs, ac), axis=0)
-            vrs = np.concatenate((vrs, vr), axis=0)
-            vcs = np.concatenate((vcs, vc), axis=0)
-
-        self.draw_mask(z, ars, acs, vrs, vcs, color)
-        median.append(np.array([np.median(ars), np.median(acs)]))
-
-        self.zdraw.append(zdraw)
-        d = datetime.datetime.now()
-        self.track_changes.append(
-            [d.strftime("%m/%d/%Y, %H:%M:%S"), "added mask", [ar, ac]]
-        )
-        return median
+        return add_mask_from_points(self.model, points, color)
 
     def draw_mask(self, z, ar, ac, vr, vc, color, idx=None):
-        """draw single mask using outlines and area"""
-        if idx is None:
-            idx = self.ncells_counter + 1
-        self.cellpix[z, vr, vc] = idx
-        self.cellpix[z, ar, ac] = idx
-        self.outpix[z, vr, vc] = idx
-        if self.restore and "upsample" in self.restore:
-            if self.resize:
-                self.cellpix_resize[z, vr, vc] = idx
-                self.cellpix_resize[z, ar, ac] = idx
-                self.outpix_resize[z, vr, vc] = idx
-                self.cellpix_orig[
-                    z, (vr / self.ratio).astype(int), (vc / self.ratio).astype(int)
-                ] = idx
-                self.cellpix_orig[
-                    z, (ar / self.ratio).astype(int), (ac / self.ratio).astype(int)
-                ] = idx
-                self.outpix_orig[
-                    z, (vr / self.ratio).astype(int), (vc / self.ratio).astype(int)
-                ] = idx
-            else:
-                self.cellpix_orig[z, vr, vc] = idx
-                self.cellpix_orig[z, ar, ac] = idx
-                self.outpix_orig[z, vr, vc] = idx
+        from .presenter_masks import paint_mask_at
 
-                # get upsampled mask
-                vrr = (vr.copy() * self.ratio).astype(int)
-                vcr = (vc.copy() * self.ratio).astype(int)
-                mask = np.zeros((np.ptp(vrr) + 4, np.ptp(vcr) + 4), np.uint8)
-                pts = np.stack((vcr - vcr.min() + 2, vrr - vrr.min() + 2), axis=-1)[
-                    :, np.newaxis, :
-                ]
-                mask = cv2.fillPoly(mask, [pts], (255, 0, 0))
-                arr, acr = np.nonzero(mask)
-                arr, acr = arr + vrr.min() - 2, acr + vcr.min() - 2
-                # get dense outline
-                contours = cv2.findContours(
-                    mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE
-                )
-                pvc, pvr = contours[-2][0].squeeze().T
-                vrr, vcr = pvr + vrr.min() - 2, pvc + vcr.min() - 2
-                # concatenate all points
-                arr, acr = np.hstack((np.vstack((vrr, vcr)), np.vstack((arr, acr))))
-                self.cellpix_resize[z, vrr, vcr] = idx
-                self.cellpix_resize[z, arr, acr] = idx
-                self.outpix_resize[z, vrr, vcr] = idx
-
-        if z == self.currentZ:
-            self.layerz[ar, ac, :3] = color
-            self.layerz[ar, ac, -1] = self.opacity
-            self.layerz[vr, vc] = np.array(self.outcolor)
+        paint_mask_at(self.model, z, ar, ac, vr, vc, color, idx=idx)
 
     def compute_scale(self):
-        # get diameter from gui
-        diameter = self.get_segmentation_parameters()["diameter"]
-        if not diameter:
-            diameter = 30
-
-        self.pr = int(diameter)
-        self.radii_padding = int(self.pr * 1.25)
-        self.radii = np.zeros((self.Ly + self.radii_padding, self.Lx, 4), np.uint8)
-        yy, xx = disk(
-            [self.Ly + self.radii_padding / 2 - 1, self.pr / 2 + 1],
-            self.pr / 2,
-            self.Ly + self.radii_padding,
-            self.Lx,
-        )
-        # rgb(150,50,150)
-        self.radii[yy, xx, 0] = 150
-        self.radii[yy, xx, 1] = 50
-        self.radii[yy, xx, 2] = 150
-        self.radii[yy, xx, 3] = 255
-        self.p0.setYRange(0, self.Ly + self.radii_padding)
-        self.p0.setXRange(0, self.Lx)
+        self.presenter.refresh_scale_from_model()
 
     def update_scale(self):
-        self.compute_scale()
-        self.scale.setImage(self.radii, autoLevels=False)
-        self.scale.setLevels([0.0, 255.0])
-        self.win.show()
-        self.show()
-
-    def draw_layer(self):
-        if self.resize:
-            self.Ly, self.Lx = self.Lyr, self.Lxr
-        else:
-            self.Ly, self.Lx = self.Ly0, self.Lx0
-
-        if self.restore and "upsample" in self.restore:
-            if self.resize:
-                self.cellpix = self.cellpix_resize.copy()
-                self.outpix = self.outpix_resize.copy()
-            else:
-                self.cellpix = self.cellpix_orig.copy()
-                self.outpix = self.outpix_orig.copy()
-
-        filter_class_id = self.instance_class_filter()
-        self.model.build_layer_rgba(filter_class_id=filter_class_id)
-        cZ = self.currentZ
-        stroke_z = np.array([s[0][0] for s in self.strokes])
-        inZ = np.nonzero(stroke_z == cZ)[0]
-        if len(inZ) > 0:
-            for i in inZ:
-                stroke = np.array(self.strokes[i])
-                self.layerz[stroke[:, 1], stroke[:, 2]] = np.array(
-                    [255, 0, 255, 100]
-                )
-
-    def set_normalize_params(self, normalize_params):
-        from cellpose.models import normalize_default
-
-        merged = {**normalize_default, **normalize_params}
-        if self.restore != "filter":
-            for key in merged:
-                if key != "percentile":
-                    merged[key] = normalize_default[key]
-        self.model.preprocessing_params = merged
-
-    def get_normalize_params(self):
-        segmentation_params = self.get_segmentation_parameters()
-        stored = dict(self.model.preprocessing_params or {})
-        params = {**normalize_default, **stored}
-        params["percentile"] = segmentation_params["percentile"]
-        return params
-
-    def compute_saturation(self):
-        segmentation_params = self.get_segmentation_parameters()
-        percentile = segmentation_params["percentile"]
-        restored_view_index = self.ViewDropDown.count() - 1
-        if (
-            self.ViewDropDown.currentIndex() == restored_view_index
-            and self.stack_filtered is not None
-        ):
-            img_norm = self.stack_filtered
-        else:
-            img_norm = self.stack
-        img_gray = as_gray_image(img_norm)
-        self.saturation = [[]]
-        if np.ptp(img_gray) > 1e-3:
-            for z in range(self.NZ):
-                plane = img_gray[z] if self.NZ > 1 else img_gray
-                x01 = np.percentile(plane, percentile[0])
-                x99 = np.percentile(plane, percentile[1])
-                self.saturation[0].append([x01, x99])
-        else:
-            for n in range(self.NZ):
-                self.saturation[0].append([0, 255.0])
-
-        self.update_plot()
-
-    def get_model_path(self, custom=False):
-        if custom:
-            self.current_model = self.ModelChooseC.currentText()
-            self.current_model_path = os.fspath(
-                models.MODEL_DIR.joinpath("custom", self.current_model)
-            )
-        else:
-            self.current_model = "cpsam"
-            self.current_model_path = models.model_path(self.current_model)
-
-    def initialize_model(self, model_name=None, custom=False):
-        if model_name is None or custom:
-            self.get_model_path(custom=custom)
-            if not os.path.exists(self.current_model_path):
-                raise ValueError(
-                    "Model file not found: need to specify model (use dropdown)"
-                )
-
-        if custom or model_name is None or not isinstance(model_name, str):
-            self.cp_model = models.CellposeModel(
-                gpu=True, pretrained_model=self.current_model_path
-            )
-        else:
-            self.current_model = model_name
-            self.current_model_path = os.fspath(
-                models.MODEL_DIR.joinpath(self.current_model)
-            )
-
-            self.cp_model = models.CellposeModel(
-                gpu=True, pretrained_model=self.current_model
-            )
-
-    def add_model(self):
-        io._add_model(self)
-        return
-
-    def remove_model(self):
-        io._remove_model(self)
-        return
-
-    def new_model(self):
-        if self.NZ != 1:
-            print("ERROR: cannot train model on 3D data")
-            return
-
-        current_train_data_folder = self.training_params.get("train_data_folder", "")
-        if not current_train_data_folder:
-            current_train_data_folder = (
-                os.path.dirname(self.filename) if self.filename else ""
-            )
-            self.training_params["train_data_folder"] = current_train_data_folder
-
-        (
-            self.train_data,
-            self.train_labels,
-            self.train_files,
-            restore,
-            normalize_params,
-        ) = ([], [], [], None, copy.deepcopy(normalize_default))
-        if current_train_data_folder:
-            try:
-                (
-                    self.train_data,
-                    self.train_labels,
-                    self.train_files,
-                    restore,
-                    normalize_params,
-                ) = self._get_train_dataset(current_train_data_folder, nested=True)
-            except ValueError as e:
-                self.logger.info(str(e))
-                self.train_files = []
-        else:
-            restore = None
-
-        # train model
-        TW = TrainWindow(self, models.MODEL_NAMES)
-        train = TW.exec()
-        if train:
-            train_data_folder = self.training_params.get("train_data_folder", "")
-            if not train_data_folder:
-                QMessageBox.warning(self, "Train", "No training folder specified.")
-                return
-            try:
-                (
-                    self.train_data,
-                    self.train_labels,
-                    self.train_files,
-                    restore,
-                    normalize_params,
-                ) = self._get_train_dataset(train_data_folder, nested=True)
-            except ValueError as e:
-                self.logger.info(str(e))
-                QMessageBox.warning(self, "Train", str(e))
-                return
-
-            if len(self.train_files) == 0:
-                QMessageBox.warning(
-                    self,
-                    "Train",
-                    "No valid training images with _seg.cellpose found in folder.",
-                )
-                return
-            self.logger.info(
-                f"training with {[os.path.split(f)[1] for f in self.train_files]}"
-            )
-            self.train_model(restore=restore, normalize_params=normalize_params)
-        else:
-            print("GUI_INFO: training cancelled")
-
-    def train_model(self, restore=None, normalize_params=None):
-        from cellpose.models import normalize_default
-
-        if normalize_params is None:
-            normalize_params = copy.deepcopy(normalize_default)
-        model_type = models.MODEL_NAMES[self.training_params["model_index"]]
-        self.logger.info(f"training new model starting at model {model_type}")
-        self.current_model = model_type
-
-        self.cp_model = models.CellposeModel(gpu=True, model_type=model_type)
-        save_path = os.fspath(models.MODEL_DIR.joinpath("custom"))
-        os.makedirs(save_path, exist_ok=True)
-
-        print("GUI_INFO: name of new model: " + self.training_params["model_name"])
-        self.new_model_path, train_losses = train.train_seg(
-            self.cp_model.net,
-            train_data=self.train_data,
-            train_labels=self.train_labels,
-            normalize=normalize_params,
-            min_train_masks=0,
-            save_path=save_path,
-            nimg_per_epoch=max(2, len(self.train_data)),
-            learning_rate=self.training_params["learning_rate"],
-            weight_decay=self.training_params["weight_decay"],
-            n_epochs=self.training_params["n_epochs"],
-            model_name=self.training_params["model_name"],
-            save_to_models_dir=False,
-        )[:2]
-        # save train losses
-        np.save(str(self.new_model_path) + "_train_losses.npy", train_losses)
-        # run model on next image
-        io._add_model(self, self.new_model_path)
-        diam_labels = self.cp_model.net.diam_labels.item()  # .copy()
-        self.new_model_ind = len(self.model_strings)
-        self.autorun = True
-        self.clear_all()
-        self.restore = restore
-        self.set_normalize_params(normalize_params)
-        self.get_next_image(load_seg=False)
-
-        self.compute_segmentation(custom=True)
-        self.logger.info(
-            f"!!! computed masks for {os.path.split(self.filename)[1]} from new model !!!"
-        )
+        self.presenter.refresh_scale_from_model()
 
     def get_training_image_files(self, folder, nested=True):
         if not folder:

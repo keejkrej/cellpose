@@ -35,7 +35,6 @@ struct LoadFolderPatternSheet: View {
                         )
                     }
                 }
-                .keyboardShortcut(.defaultAction)
                 .disabled(filenameTemplate.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
         }

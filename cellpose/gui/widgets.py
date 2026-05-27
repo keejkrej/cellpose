@@ -7,7 +7,7 @@ import os
 import numpy as np
 
 os.environ.setdefault("PYQTGRAPH_QT_LIB", "PySide6")
-from PySide6 import QtCore
+from PySide6 import QtCore, QtGui
 from PySide6.QtWidgets import (
     QCheckBox,
     QFrame,
@@ -148,21 +148,7 @@ class QHLine(QFrame):
 
 
 class SeriesAxisSlider(QSlider):
-    keyboardRelease = QtCore.Signal()
-
-    def keyReleaseEvent(self, event):
-        super().keyReleaseEvent(event)
-        if event.isAutoRepeat():
-            return
-        if event.key() in [
-            QtCore.Qt.Key_Left,
-            QtCore.Qt.Key_Right,
-            QtCore.Qt.Key_PageUp,
-            QtCore.Qt.Key_PageDown,
-            QtCore.Qt.Key_Home,
-            QtCore.Qt.Key_End,
-        ]:
-            self.keyboardRelease.emit()
+    pass
 
 
 def make_bwr():
@@ -179,6 +165,14 @@ def as_gray_image(image):
     if image.ndim > 2:
         return image[..., 0]
     return image
+
+
+def brush_cursor() -> QtGui.QCursor:
+    return QtGui.QCursor(QtCore.Qt.CursorShape.ArrowCursor)
+
+
+def select_cursor() -> QtGui.QCursor:
+    return QtGui.QCursor(QtCore.Qt.CursorShape.CrossCursor)
 
 
 class ViewBoxNoRightDrag(pg.ViewBox):
@@ -199,15 +193,6 @@ class ViewBoxNoRightDrag(pg.ViewBox):
         self.parent = parent
         self.axHistoryPointer = -1
 
-    def keyPressEvent(self, ev):
-        ev.accept()
-        if ev.text() == "-":
-            self.scaleBy([1.1, 1.1])
-        elif ev.text() in ["+", "="]:
-            self.scaleBy([0.9, 0.9])
-        else:
-            ev.ignore()
-
 
 class ImageDraw(pg.ImageItem):
     sigImageChanged = QtCore.Signal()
@@ -222,57 +207,60 @@ class ImageDraw(pg.ImageItem):
 
         self.parent = parent
         self.setDrawKernel(kernel_size=self.parent.brush_size)
-        self.parent.current_stroke = []
-        self.parent.in_stroke = False
+        self.parent.model.drawing.current_stroke = []
+        self.parent.model.drawing.in_stroke = False
 
     def mouseClickEvent(self, ev):
         if self.parent.rect_select_mode:
             ev.accept()
             return
-        if self.parent.loaded and not self.parent.removing_region:
+        session = self.parent.model.session
+        selection = self.parent.model.selection
+        drawing = self.parent.model.drawing
+        if session.loaded and not selection.removing_region:
             if (
-                self.parent.brush_mode
+                drawing.brush_mode
                 and ev.button() == QtCore.Qt.LeftButton
                 and not ev.double()
-                and not self.parent.deleting_multiple
+                and not selection.deleting_multiple
                 and not self.parent.rect_select_mode
             ):
-                if not self.parent.in_stroke:
+                if not drawing.in_stroke:
                     ev.accept()
                     self.create_start(ev.pos())
-                    self.parent.stroke_appended = False
-                    self.parent.in_stroke = True
+                    drawing.stroke_appended = False
+                    drawing.in_stroke = True
                     self.drawAt(ev.pos(), ev)
                 else:
                     ev.accept()
                     self.drawAt(ev.pos(), ev)
                     self.end_stroke()
-                    self.parent.in_stroke = False
-            elif not self.parent.in_stroke:
+                    drawing.in_stroke = False
+            elif not drawing.in_stroke:
                 y, x = int(ev.pos().y()), int(ev.pos().x())
-                if y >= 0 and y < self.parent.Ly and x >= 0 and x < self.parent.Lx:
+                if y >= 0 and y < session.ly and x >= 0 and x < session.lx:
                     if ev.button() == QtCore.Qt.LeftButton and not ev.double():
-                        idx = self.parent.cellpix[self.parent.currentZ][y, x]
+                        idx = session.cellpix[session.current_z][y, x]
                         if idx > 0:
                             if ev.modifiers() & QtCore.Qt.ControlModifier:
                                 self.parent.remove_cell(idx)
                             elif ev.modifiers() & QtCore.Qt.AltModifier:
                                 self.parent.merge_cells(idx)
                             elif (
-                                not self.parent.deleting_multiple
+                                not selection.deleting_multiple
                                 and not self.parent.rect_select_mode
                             ):
                                 self.parent.unselect_cell()
                                 self.parent.select_cell(idx)
-                            elif self.parent.deleting_multiple:
-                                if idx in self.parent.removing_cells_list:
+                            elif selection.deleting_multiple:
+                                if idx in selection.removing_cells_list:
                                     self.parent.unselect_cell_multi(idx)
-                                    self.parent.removing_cells_list.remove(idx)
+                                    selection.removing_cells_list.remove(idx)
                                 else:
                                     self.parent.select_cell_multi(idx)
-                                    self.parent.removing_cells_list.append(idx)
+                                    selection.removing_cells_list.append(idx)
 
-                        elif not self.parent.deleting_multiple:
+                        elif not selection.deleting_multiple:
                             self.parent.unselect_cell()
 
     def mouseDragEvent(self, ev):
@@ -280,7 +268,7 @@ class ImageDraw(pg.ImageItem):
         return
 
     def hoverEvent(self, ev):
-        if self.parent.in_stroke:
+        if self.parent.model.drawing.in_stroke:
             self.drawAt(ev.pos())
             if self.is_at_start(ev.pos()):
                 self.end_stroke()
@@ -297,10 +285,11 @@ class ImageDraw(pg.ImageItem):
         self.parent.p0.addItem(self.scatter)
 
     def is_at_start(self, pos):
+        drawing = self.parent.model.drawing
         thresh_out = max(6, self.parent.brush_size * 3)
         thresh_in = max(3, self.parent.brush_size * 1.8)
-        if len(self.parent.current_stroke) > 3:
-            stroke = np.array(self.parent.current_stroke)
+        if len(drawing.current_stroke) > 3:
+            stroke = np.array(drawing.current_stroke)
             dist = (
                 ((stroke[1:, 1:] - stroke[:1, 1:][np.newaxis, :, :]) ** 2).sum(axis=-1)
             ) ** 0.5
@@ -314,30 +303,28 @@ class ImageDraw(pg.ImageItem):
         return False
 
     def end_stroke(self):
+        drawing = self.parent.model.drawing
         self.parent.p0.removeItem(self.scatter)
-        if not self.parent.stroke_appended:
-            self.parent.strokes.append(self.parent.current_stroke)
-            self.parent.stroke_appended = True
-            self.parent.current_stroke = np.array(self.parent.current_stroke)
-            ioutline = self.parent.current_stroke[:, 3] == 1
-            self.parent.current_point_set.append(
-                list(self.parent.current_stroke[ioutline])
-            )
-            self.parent.current_stroke = []
+        if not drawing.stroke_appended:
+            drawing.strokes.append(drawing.current_stroke)
+            drawing.stroke_appended = True
+            drawing.current_stroke = np.array(drawing.current_stroke)
+            ioutline = drawing.current_stroke[:, 3] == 1
+            drawing.current_point_set.append(list(drawing.current_stroke[ioutline]))
+            drawing.current_stroke = []
             self.parent.add_set()
-        if (
-            len(self.parent.current_point_set)
-            and len(self.parent.current_point_set[0]) > 0
-        ):
+        if len(drawing.current_point_set) and len(drawing.current_point_set[0]) > 0:
             self.parent.add_set()
-        self.parent.in_stroke = False
+        drawing.in_stroke = False
 
     def tabletEvent(self, ev):
         pass
 
     def drawAt(self, pos, ev=None):
+        session = self.parent.model.session
+        drawing = self.parent.model.drawing
         mask = self.strokemask
-        stroke = self.parent.current_stroke
+        stroke = drawing.current_stroke
         pos = [int(pos.y()), int(pos.x())]
         dk = self.drawKernel
         kc = self.drawKernelCenter
@@ -356,17 +343,17 @@ class ImageDraw(pg.ImageItem):
             sy[1] = kc[1] + 1
             ty = sy
             kcent[1] = 0
-        if tx[1] >= self.parent.Ly - 1:
+        if tx[1] >= session.ly - 1:
             sx[0] = dk.shape[0] - kc[0] - 1
             sx[1] = dk.shape[0]
-            tx[0] = self.parent.Ly - kc[0] - 1
-            tx[1] = self.parent.Ly
+            tx[0] = session.ly - kc[0] - 1
+            tx[1] = session.ly
             kcent[0] = tx[1] - tx[0] - 1
-        if ty[1] >= self.parent.Lx - 1:
+        if ty[1] >= session.lx - 1:
             sy[0] = dk.shape[1] - kc[1] - 1
             sy[1] = dk.shape[1]
-            ty[0] = self.parent.Lx - kc[1] - 1
-            ty[1] = self.parent.Lx
+            ty[0] = session.lx - kc[1] - 1
+            ty[1] = session.lx
             kcent[1] = ty[1] - ty[0] - 1
 
         ts = (slice(tx[0], tx[1]), slice(ty[0], ty[1]))
@@ -376,7 +363,7 @@ class ImageDraw(pg.ImageItem):
         for ky, y in enumerate(np.arange(ty[0], ty[1], 1, int)):
             for kx, x in enumerate(np.arange(tx[0], tx[1], 1, int)):
                 iscent = np.logical_and(kx == kcent[0], ky == kcent[1])
-                stroke.append([self.parent.currentZ, x, y, iscent])
+                stroke.append([session.current_z, x, y, iscent])
         self.updateImage()
 
     def setDrawKernel(self, kernel_size=3):

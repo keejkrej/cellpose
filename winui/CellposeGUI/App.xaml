@@ -45,7 +45,7 @@
                         Value="{StaticResource WhiteBrush}" />
             </Style>
 
-            <Style x:Key="InstanceVisibilityCheckBoxStyle" TargetType="CheckBox">
+            <Style x:Key="LabelsVisibilityCheckBoxStyle" TargetType="CheckBox">
                 <Setter Property="HorizontalAlignment" Value="Center" />
                 <Setter Property="VerticalAlignment" Value="Center" />
                 <Setter Property="MinWidth" Value="20" />

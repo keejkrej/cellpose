@@ -32,6 +32,13 @@ final class MainViewModel {
     var classFilterText = ""
     var defaultClassID: Int32 = 0
     var brushMode = false
+    var selectMode = false
+    var selectedCells: [Int32] = []
+    var selectedLabelRows: Set<Int> = []
+    var selectionRevision = 0
+    var labelsRowsRevision = 0
+    var showEditClassDialog = false
+    var editClassInitialValue: Int32 = 0
     var inStroke = false
     var strokeRevision = 0
     var viewMode: ViewMode = .image
@@ -46,6 +53,7 @@ final class MainViewModel {
 
     var canSaveMasks: Bool { imageLoaded && ncells > 0 }
     var canRunSegmentation: Bool { imageLoaded && !isBusy }
+    var canUseLabelTools: Bool { imageLoaded && ncells > 0 }
     var currentStrokePoints: [[Double]] { currentStroke }
 
     private let ml: MlInferenceEngine
@@ -80,6 +88,7 @@ final class MainViewModel {
         ncells = 0
         recomputeMasks = false
         selectedCell = 0
+        setCellSelection([])
         instanceClasses.replace(ncells: 0)
         progress = 1
         imageLoaded = true
@@ -102,7 +111,7 @@ final class MainViewModel {
         ncells = loaded.masks.labels.isEmpty ? 0 : Int(loaded.masks.labels.max() ?? 0)
         recomputeMasks = loaded.recomputeMasks
         instanceClasses.replace(ncells: ncells)
-        selectedCell = 0
+        setCellSelection([])
         progress = 1
         imageLoaded = true
         updateSaturationFromImage()
@@ -119,6 +128,103 @@ final class MainViewModel {
         session.masks = colored
         masks = colored
         ncells = newNcells
+        labelsRowsRevision += 1
+    }
+
+    func isCellSelected(_ label: Int32) -> Bool {
+        label > 0 && selectedCells.contains(label)
+    }
+
+    func setCellSelection(_ cells: [Int32]) {
+        let normalized = Array(Set(cells.filter { $0 > 0 })).sorted()
+        guard normalized != selectedCells else {
+            selectionRevision += 1
+            return
+        }
+        selectedCells = normalized
+        selectedCell = normalized.first ?? 0
+        selectedLabelRows = Set(normalized.map { Int($0) - 1 }.filter { $0 >= 0 })
+        selectionRevision += 1
+    }
+
+    func selectedCellIndices() -> [Int32] {
+        if !selectedCells.isEmpty {
+            return selectedCells
+        }
+        if selectedCell > 0 {
+            return [selectedCell]
+        }
+        return []
+    }
+
+    func selectCellAt(x: Int, y: Int, additive: Bool) {
+        guard let masks else { return }
+        let label = masks.label(at: x, y: y)
+        if label > 0 {
+            if additive {
+                var cells = selectedCells
+                if !cells.contains(label) {
+                    cells.append(label)
+                }
+                setCellSelection(cells)
+            } else {
+                setCellSelection([label])
+            }
+            return
+        }
+        if !additive {
+            setCellSelection([])
+        }
+    }
+
+    func selectCellsInRect(x0: Int, y0: Int, x1: Int, y1: Int, additive: Bool) {
+        guard let masks else { return }
+        let filter = InstanceClasses.parseFilter(classFilterText)
+        let cells = MaskEditService.cellsFullyInRect(
+            labels: masks.labels,
+            width: masks.width,
+            height: masks.height,
+            x0: x0,
+            y0: y0,
+            x1: x1,
+            y1: y1,
+            filterClassID: filter,
+            classIDs: instanceClasses.values
+        )
+        if additive {
+            setCellSelection(selectedCells + cells)
+        } else {
+            setCellSelection(cells)
+        }
+    }
+
+    func deleteSelectedCells() async {
+        let cells = selectedCellIndices().map(Int.init)
+        guard !cells.isEmpty else { return }
+        await removeCells(indices: cells)
+    }
+
+    func prepareEditSelectedCells() -> Bool {
+        let cells = selectedCellIndices()
+        guard !cells.isEmpty else { return false }
+        let classIDs = cells.compactMap { idx -> Int32? in
+            let row = Int(idx) - 1
+            guard row >= 0, row < instanceClasses.values.count else { return nil }
+            return instanceClasses.values[row]
+        }
+        editClassInitialValue = classIDs.count == 1 || Set(classIDs).count == 1 ? (classIDs.first ?? 0) : 0
+        showEditClassDialog = true
+        return true
+    }
+
+    func applyClassToSelectedCells(classID: Int32) {
+        for idx in selectedCellIndices() {
+            let row = Int(idx) - 1
+            if row >= 0 {
+                setInstanceClass(row: row, classID: classID)
+            }
+        }
+        labelsRowsRevision += 1
     }
 
     func setInstanceClass(row: Int, classID: Int32) {
@@ -127,6 +233,7 @@ final class MainViewModel {
         let colored = MaskEditService.withClassColors(masks: currentMasks, classIDs: instanceClasses.values)
         session.masks = colored
         masks = colored
+        labelsRowsRevision += 1
     }
 
     func applyInferenceResult(_ result: InferResult) {
@@ -362,7 +469,7 @@ final class MainViewModel {
         }
     }
 
-    func refreshInstanceFilter() {}
+    func refreshLabelsFilter() {}
 
     func runSegmentation() async {
         guard session.imagePath != nil else { return }
@@ -440,7 +547,7 @@ final class MainViewModel {
     }
 
     func removeCell(at x: Int, y: Int, modifierFlags: NSEvent.ModifierFlags) {
-        guard let masks else { return }
+        guard let masks, !selectMode else { return }
         let label = masks.label(at: x, y: y)
         guard label > 0 else { return }
 
@@ -456,6 +563,7 @@ final class MainViewModel {
         }
 
         selectedCell = label
+        setCellSelection([label])
     }
 
     func removeCells(indices: [Int]) async {
@@ -463,7 +571,7 @@ final class MainViewModel {
         await runTask(message: "Removing cells…") {
             let updated = MaskEditService.removeCells(masks: currentMasks, indices: indices)
             self.applyMaskUpdate(updated)
-            self.selectedCell = 0
+            self.setCellSelection([])
             self.saveSessionIfNeeded()
         }
     }

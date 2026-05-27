@@ -3,18 +3,20 @@ using CellposeGUI.Models;
 
 namespace CellposeGUI.ViewModels;
 
-public sealed class InstanceRowViewModel : INotifyPropertyChanged
+public sealed class LabelRowViewModel : INotifyPropertyChanged
 {
     private readonly MainViewModel _viewModel;
     private readonly int _row;
 
-    public InstanceRowViewModel(MainViewModel viewModel, int row)
+    public LabelRowViewModel(MainViewModel viewModel, int row)
     {
         _viewModel = viewModel;
         _row = row;
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;
+
+    public int Row => _row;
 
     public string RoiLabel => (_row + 1).ToString();
 

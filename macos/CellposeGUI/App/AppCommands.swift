@@ -22,19 +22,16 @@ struct AppCommands: Commands {
             Button("Load image") {
                 Task { await viewModel?.loadImagePanel() }
             }
-            .keyboardShortcut("l", modifiers: [.command])
 
             Button("Load folder") {
                 viewModel?.presentLoadFolderPanel()
             }
-            .keyboardShortcut("l", modifiers: [.command, .shift])
 
             Divider()
 
             Button("Save results") {
                 Task { await viewModel?.saveResults() }
             }
-            .keyboardShortcut("s", modifiers: [.command])
             .disabled(!(viewModel?.canSaveMasks ?? false))
         }
 
@@ -42,19 +39,16 @@ struct AppCommands: Commands {
             Button("Undo previous mask/trace") {
                 viewModel?.undoAction()
             }
-            .keyboardShortcut("z", modifiers: [.command])
             .disabled(true)
 
             Button("Undo remove mask") {
                 viewModel?.undoRemoveAction()
             }
-            .keyboardShortcut("y", modifiers: [.command])
             .disabled(true)
 
             Button("Clear all masks") {
                 Task { await viewModel?.clearAllMasks() }
             }
-            .keyboardShortcut("0", modifiers: [.command])
             .disabled(!(viewModel?.canSaveMasks ?? false))
 
             Button("Remove selected cell (Ctrl+Click)") {}
@@ -77,7 +71,6 @@ struct AppCommands: Commands {
             Button("Train new model with image+masks in folder") {
                 viewModel?.showTrainDialog = true
             }
-            .keyboardShortcut("t", modifiers: [.command])
             .disabled(!(viewModel?.imageLoaded ?? false))
         }
     }

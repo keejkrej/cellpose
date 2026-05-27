@@ -17,9 +17,15 @@ struct ImageCanvasView: NSViewRepresentable {
                     view.inStroke = viewModel.inStroke
                     view.needsDisplay = true
                 }
-            } else {
+            } else if !viewModel.selectMode {
                 viewModel.removeCell(at: Int(point.x), y: Int(point.y), modifierFlags: view.lastModifierFlags)
             }
+        }
+        view.onSelectClick = { point, additive in
+            viewModel.selectCellAt(x: Int(point.x), y: Int(point.y), additive: additive)
+        }
+        view.onSelectRect = { x0, y0, x1, y1, additive in
+            viewModel.selectCellsInRect(x0: x0, y0: y0, x1: x1, y1: y1, additive: additive)
         }
         view.onHover = { point in
             if viewModel.brushMode, viewModel.inStroke {
@@ -31,20 +37,6 @@ struct ImageCanvasView: NSViewRepresentable {
         view.onScroll = { delta in
             zoom = max(0.1, min(20, zoom * (delta > 0 ? 1.1 : 0.9)))
         }
-        view.onKeyPress = { event in
-            switch event.keyCode {
-            case 123, 0: // left arrow or A
-                Task { await viewModel.navigateSeries(delta: -1) }
-            case 124, 2: // right arrow or D
-                Task { await viewModel.navigateSeries(delta: 1) }
-            case 116: // page up
-                viewModel.cycleViewMode(forward: false)
-            case 121: // page down
-                viewModel.cycleViewMode(forward: true)
-            default:
-                break
-            }
-        }
         return view
     }
 
@@ -53,9 +45,12 @@ struct ImageCanvasView: NSViewRepresentable {
         nsView.masks = viewModel.masks
         nsView.showMasks = viewModel.showMasks
         nsView.showOutlines = viewModel.showOutlines
-        nsView.selectedCell = viewModel.selectedCell
+        nsView.selectedCells = Set(viewModel.selectedCellIndices())
         nsView.liveStroke = viewModel.currentStrokePoints
         nsView.inStroke = viewModel.inStroke
+        nsView.brushMode = viewModel.brushMode
+        nsView.selectMode = viewModel.selectMode
+        nsView.selectionRevision = viewModel.selectionRevision
         nsView.zoom = zoom
         nsView.needsDisplay = true
     }
@@ -66,21 +61,28 @@ final class ImageCanvasNSView: NSView {
     var masks: MaskData?
     var showMasks = true
     var showOutlines = false
-    var selectedCell: Int32 = 0
+    var selectedCells: Set<Int32> = []
     var liveStroke: [[Double]] = []
     var inStroke = false
+    var brushMode = false
+    var selectMode = false
+    var selectionRevision = 0
     var zoom: CGFloat = 1
     var onClick: ((NSPoint) -> Void)?
+    var onSelectClick: ((NSPoint, Bool) -> Void)?
+    var onSelectRect: ((Int, Int, Int, Int, Bool) -> Void)?
     var onHover: ((NSPoint) -> Void)?
     var onScroll: ((CGFloat) -> Void)?
 
     private var panOffset = NSPoint.zero
     private var trackingArea: NSTrackingArea?
     var lastModifierFlags: NSEvent.ModifierFlags = []
+    private var selectStart: NSPoint?
+    private var selectDragging = false
+    private var selectPreviewBounds: (x0: Int, y0: Int, x1: Int, y1: Int)?
+    private let selectDragThreshold = 4
 
-    var onKeyPress: ((NSEvent) -> Void)?
-
-    override var acceptsFirstResponder: Bool { true }
+    override var acceptsFirstResponder: Bool { false }
 
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
@@ -118,6 +120,43 @@ final class ImageCanvasNSView: NSView {
         if inStroke, !liveStroke.isEmpty {
             drawLiveStroke(in: rect, context: context)
         }
+
+        if let preview = selectPreviewBounds {
+            drawBoundsRect(preview, in: rect, context: context, r: 0, g: 1, b: 1)
+        }
+
+        for label in selectedCells.sorted() {
+            guard let masks,
+                  let bounds = MaskEditService.cellBounds(
+                    labels: masks.labels,
+                    width: masks.width,
+                    height: masks.height,
+                    label: label
+                  ) else { continue }
+            drawBoundsRect(bounds, in: rect, context: context, r: 1, g: 1, b: 0)
+        }
+    }
+
+    private func drawBoundsRect(
+        _ bounds: (x0: Int, y0: Int, x1: Int, y1: Int),
+        in rect: NSRect,
+        context: CGContext,
+        r: CGFloat,
+        g: CGFloat,
+        b: CGFloat
+    ) {
+        guard let image else { return }
+        let pixelWidth = rect.width / CGFloat(image.width)
+        let pixelHeight = rect.height / CGFloat(image.height)
+        let x = rect.minX + CGFloat(bounds.x0) * pixelWidth
+        let y = rect.minY + CGFloat(image.height - bounds.y1 - 1) * pixelHeight
+        let width = CGFloat(bounds.x1 - bounds.x0 + 1) * pixelWidth
+        let height = CGFloat(bounds.y1 - bounds.y0 + 1) * pixelHeight
+        context.setStrokeColor(red: r, green: g, blue: b, alpha: 1)
+        context.setLineWidth(2)
+        context.setLineDash(phase: 0, lengths: [4, 3])
+        context.stroke(CGRect(x: x, y: y, width: max(width, 1), height: max(height, 1)))
+        context.setLineDash(phase: 0, lengths: [])
     }
 
     private func drawLiveStroke(in rect: NSRect, context: CGContext) {
@@ -204,7 +243,7 @@ final class ImageCanvasNSView: NSView {
                 let fillLabel = masks.labels[y * width + x]
 
                 if showMasks, fillLabel > 0, let color = masks.color(at: x, y: y) {
-                    let alpha: CGFloat = fillLabel == selectedCell ? 0.75 : CGFloat(color.3)
+                    let alpha: CGFloat = selectedCells.contains(fillLabel) ? 0.75 : CGFloat(color.3)
                     context.setFillColor(
                         red: CGFloat(color.0) / 255,
                         green: CGFloat(color.1) / 255,
@@ -224,7 +263,7 @@ final class ImageCanvasNSView: NSView {
                 let outlineLabel = masks.outlineLabels?[y * width + x] ?? 0
                 guard outlineLabel > 0 else { continue }
 
-                let outlineAlpha: CGFloat = outlineLabel == selectedCell ? 0.85 : 200.0 / 255.0
+                let outlineAlpha: CGFloat = selectedCells.contains(outlineLabel) ? 0.85 : 200.0 / 255.0
                 context.setFillColor(red: 200.0 / 255, green: 200.0 / 255, blue: 1, alpha: outlineAlpha)
                 let outlineRect = NSRect(
                     x: rect.minX + CGFloat(x) * pixelWidth,
@@ -266,12 +305,92 @@ final class ImageCanvasNSView: NSView {
     override func mouseDown(with event: NSEvent) {
         lastModifierFlags = event.modifierFlags
         guard let point = imagePoint(from: convert(event.locationInWindow, from: nil)) else { return }
+
+        if selectMode {
+            selectStart = point
+            selectDragging = false
+            selectPreviewBounds = nil
+            needsDisplay = true
+            return
+        }
+
         onClick?(point)
     }
 
-    override func mouseMoved(with event: NSEvent) {
-        guard let point = imagePoint(from: convert(event.locationInWindow, from: nil)) else { return }
+    override func mouseDragged(with event: NSEvent) {
+        lastModifierFlags = event.modifierFlags
+        let location = convert(event.locationInWindow, from: nil)
+        updateCursor(at: location)
+
+        if selectMode,
+           let start = selectStart,
+           let current = imagePoint(from: location) {
+            if !selectDragging {
+                if max(abs(current.x - start.x), abs(current.y - start.y)) < CGFloat(selectDragThreshold) {
+                    return
+                }
+                selectDragging = true
+            }
+            selectPreviewBounds = (
+                Int(min(start.x, current.x)),
+                Int(min(start.y, current.y)),
+                Int(max(start.x, current.x)),
+                Int(max(start.y, current.y))
+            )
+            needsDisplay = true
+            return
+        }
+
+        guard let point = imagePoint(from: location) else { return }
         onHover?(point)
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        lastModifierFlags = event.modifierFlags
+        guard selectMode, let start = selectStart else { return }
+
+        let additive = event.modifierFlags.contains(.shift)
+        if selectDragging, let preview = selectPreviewBounds {
+            onSelectRect?(preview.x0, preview.y0, preview.x1, preview.y1, additive)
+        } else if let end = imagePoint(from: convert(event.locationInWindow, from: nil)) {
+            onSelectClick?(end, additive)
+        }
+
+        selectStart = nil
+        selectDragging = false
+        selectPreviewBounds = nil
+        needsDisplay = true
+    }
+
+    override func mouseMoved(with event: NSEvent) {
+        let location = convert(event.locationInWindow, from: nil)
+        updateCursor(at: location)
+        guard let point = imagePoint(from: location) else { return }
+        onHover?(point)
+    }
+
+    func updateCursor(at location: NSPoint) {
+        guard image != nil else {
+            NSCursor.arrow.set()
+            return
+        }
+
+        if imagePoint(from: location) == nil {
+            NSCursor.arrow.set()
+            return
+        }
+
+        if selectMode {
+            NSCursor.crosshair.set()
+        } else {
+            NSCursor.arrow.set()
+        }
+    }
+
+    override func resetCursorRects() {
+        super.resetCursorRects()
+        discardCursorRects()
+        addCursorRect(bounds, cursor: selectMode ? .crosshair : .arrow)
     }
 
     override func scrollWheel(with event: NSEvent) {
@@ -287,19 +406,5 @@ final class ImageCanvasNSView: NSView {
     override func magnify(with event: NSEvent) {
         zoom = max(0.1, min(20, zoom * (1 + event.magnification)))
         needsDisplay = true
-    }
-
-    override func keyDown(with event: NSEvent) {
-        onKeyPress?(event)
-        switch event.charactersIgnoringModifiers {
-        case "+", "=":
-            zoom = min(20, zoom * 1.1)
-            needsDisplay = true
-        case "-":
-            zoom = max(0.1, zoom / 1.1)
-            needsDisplay = true
-        default:
-            super.keyDown(with: event)
-        }
     }
 }

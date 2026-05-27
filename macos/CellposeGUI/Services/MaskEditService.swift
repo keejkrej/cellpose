@@ -287,4 +287,89 @@ enum MaskEditService {
             }
         }
     }
+
+    static func cellBounds(
+        labels: [Int32],
+        width: Int,
+        height: Int,
+        label: Int32,
+        margin: Int = 1
+    ) -> (x0: Int, y0: Int, x1: Int, y1: Int)? {
+        guard label > 0 else { return nil }
+
+        var minY = height
+        var minX = width
+        var maxY = -1
+        var maxX = -1
+        for y in 0 ..< height {
+            for x in 0 ..< width where labels[y * width + x] == label {
+                minY = min(minY, y)
+                minX = min(minX, x)
+                maxY = max(maxY, y)
+                maxX = max(maxX, x)
+            }
+        }
+
+        guard maxY >= 0 else { return nil }
+        return (
+            max(0, minX - margin),
+            max(0, minY - margin),
+            min(width - 1, maxX + margin),
+            min(height - 1, maxY + margin)
+        )
+    }
+
+    static func cellsFullyInRect(
+        labels: [Int32],
+        width: Int,
+        height: Int,
+        x0: Int,
+        y0: Int,
+        x1: Int,
+        y1: Int,
+        filterClassID: Int32? = nil,
+        classIDs: [Int32]? = nil
+    ) -> [Int32] {
+        let left = max(0, min(min(x0, x1), width - 1))
+        let right = min(width, max(x0, x1))
+        let top = max(0, min(min(y0, y1), height - 1))
+        let bottom = min(height, max(y0, y1))
+        guard right > left, bottom > top else { return [] }
+
+        var candidates = Set<Int32>()
+        for y in top ..< bottom {
+            for x in left ..< right {
+                let label = labels[y * width + x]
+                if label > 0 {
+                    candidates.insert(label)
+                }
+            }
+        }
+
+        var fullyCovered: [Int32] = []
+        for label in candidates.sorted() {
+            var inside = true
+            for y in 0 ..< height {
+                for x in 0 ..< width where labels[y * width + x] == label {
+                    if y < top || y >= bottom || x < left || x >= right {
+                        inside = false
+                        break
+                    }
+                }
+                if !inside { break }
+            }
+            guard inside else { continue }
+
+            if let filterClassID, let classIDs {
+                let row = Int(label) - 1
+                if row < 0 || row >= classIDs.count || classIDs[row] != filterClassID {
+                    continue
+                }
+            }
+
+            fullyCovered.append(label)
+        }
+
+        return fullyCovered
+    }
 }

@@ -23,7 +23,6 @@ struct TrainDialogView: View {
                     isPresented = false
                     Task { await viewModel.trainModel() }
                 }
-                .keyboardShortcut(.defaultAction)
                 .disabled(viewModel.trainingParams.trainDataFolder.isEmpty)
             }
         }

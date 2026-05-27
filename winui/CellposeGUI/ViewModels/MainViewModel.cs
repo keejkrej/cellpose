@@ -42,7 +42,9 @@ public sealed class MainViewModel : ObservableObject
     private string _classFilterText = "";
     private int _defaultClassId;
     private bool _brushMode;
+    private bool _selectMode;
     private bool _inStroke;
+    private readonly List<int> _selectedCells = [];
     private List<string> _models = ["CPSAM"];
 
     public MainViewModel(
@@ -107,14 +109,21 @@ public sealed class MainViewModel : ObservableObject
             SetProperty(ref _ncells, value);
             Notify(nameof(CanSaveMasks));
             Notify(nameof(FilteredCellCount));
+            Notify(nameof(CanUseLabelTools));
         }
     }
 
     public int SelectedCell
     {
-        get => _selectedCell;
-        set => SetProperty(ref _selectedCell, value);
+        get => _selectedCells.Count > 0 ? _selectedCells[0] : _selectedCell;
+        set => SetCellSelection(value > 0 ? [value] : []);
     }
+
+    public IReadOnlyList<int> SelectedCells => _selectedCells;
+
+    public int SelectionRevision { get; private set; }
+
+    public bool CanUseLabelTools => _imageLoaded && _ncells > 0;
 
     public bool ShowMasks
     {
@@ -136,6 +145,7 @@ public sealed class MainViewModel : ObservableObject
             SetProperty(ref _imageLoaded, value);
             Notify(nameof(CanRunSegmentation));
             Notify(nameof(CanSaveMasks));
+            Notify(nameof(CanUseLabelTools));
         }
     }
 
@@ -200,7 +210,7 @@ public sealed class MainViewModel : ObservableObject
     public InstanceClasses InstanceClasses { get; }
     public InstanceVisibility InstanceVisibility { get; }
 
-    public bool? AllInstancesVisible
+    public bool? AllLabelsVisible
     {
         get
         {
@@ -255,10 +265,36 @@ public sealed class MainViewModel : ObservableObject
                 return;
 
             SetProperty(ref _brushMode, value);
-            if (!value)
+            if (value)
+            {
+                if (_selectMode)
+                    SelectMode = false;
+            }
+            else
+            {
                 CancelStroke();
+            }
         }
     }
+
+    public bool SelectMode
+    {
+        get => _selectMode;
+        set
+        {
+            if (_selectMode == value)
+                return;
+
+            SetProperty(ref _selectMode, value);
+            if (value)
+            {
+                if (_brushMode)
+                    BrushMode = false;
+            }
+        }
+    }
+
+    public bool IsCellSelected(int label) => label > 0 && _selectedCells.Contains(label);
 
     public bool InStroke => _inStroke;
 
@@ -327,7 +363,7 @@ public sealed class MainViewModel : ObservableObject
         }
     }
 
-    public int InstanceRowsRevision { get; private set; }
+    public int LabelsRowsRevision { get; private set; }
 
     public void ApplyLoadedImage(string path, ImageData image)
     {
@@ -349,7 +385,7 @@ public sealed class MainViewModel : ObservableObject
         Masks = null;
         Ncells = 0;
         RecomputeMasks = false;
-        SelectedCell = 0;
+        SetCellSelection([]);
         InstanceClasses.Replace(0);
         InstanceVisibility.Replace(0);
         Progress = 1;
@@ -379,7 +415,7 @@ public sealed class MainViewModel : ObservableObject
         Image = loaded.Image;
         RecomputeMasks = loaded.RecomputeMasks;
         SegmentationParams.CopyFrom(loaded.Segmentation);
-        SelectedCell = 0;
+        SetCellSelection([]);
         Progress = 1;
         ImageLoaded = true;
         UpdateSaturationFromImage();
@@ -426,10 +462,10 @@ public sealed class MainViewModel : ObservableObject
         _session.Masks = masks;
         Masks = masks;
         Ncells = ncells;
-        InstanceRowsRevision++;
-        Notify(nameof(InstanceRowsRevision));
+        LabelsRowsRevision++;
+        Notify(nameof(LabelsRowsRevision));
         Notify(nameof(FilteredCellCount));
-        Notify(nameof(AllInstancesVisible));
+        Notify(nameof(AllLabelsVisible));
         NotifyCanvasChanged();
     }
 
@@ -445,8 +481,8 @@ public sealed class MainViewModel : ObservableObject
         var updated = MaskEditService.WithClassColors(_session.Masks, InstanceClasses.Values);
         _session.Masks = updated;
         Masks = updated;
-        InstanceRowsRevision++;
-        Notify(nameof(InstanceRowsRevision));
+        LabelsRowsRevision++;
+        Notify(nameof(LabelsRowsRevision));
         NotifyCanvasChanged();
     }
 
@@ -505,18 +541,18 @@ public sealed class MainViewModel : ObservableObject
             return;
 
         InstanceVisibility.SetVisible(row, visible);
-        InstanceRowsRevision++;
-        Notify(nameof(InstanceRowsRevision));
-        Notify(nameof(AllInstancesVisible));
+        LabelsRowsRevision++;
+        Notify(nameof(LabelsRowsRevision));
+        Notify(nameof(AllLabelsVisible));
         NotifyCanvasChanged();
     }
 
     public void SetAllInstanceVisible(bool visible)
     {
         InstanceVisibility.SetAll(_ncells, visible);
-        InstanceRowsRevision++;
-        Notify(nameof(InstanceRowsRevision));
-        Notify(nameof(AllInstancesVisible));
+        LabelsRowsRevision++;
+        Notify(nameof(LabelsRowsRevision));
+        Notify(nameof(AllLabelsVisible));
         NotifyCanvasChanged();
     }
 
@@ -840,6 +876,110 @@ public sealed class MainViewModel : ObservableObject
         });
     }
 
+    public void SetCellSelection(IReadOnlyList<int> cells)
+    {
+        if (!_dispatcher.HasThreadAccess)
+        {
+            RunOnUi(() => SetCellSelection(cells));
+            return;
+        }
+
+        var normalized = cells.Where(c => c > 0).Distinct().OrderBy(c => c).ToList();
+        if (_selectedCells.SequenceEqual(normalized))
+        {
+            SelectionRevision++;
+            Notify(nameof(SelectionRevision));
+            return;
+        }
+
+        _selectedCells.Clear();
+        _selectedCells.AddRange(normalized);
+        _selectedCell = normalized.FirstOrDefault();
+        SelectionRevision++;
+        Notify(nameof(SelectedCell));
+        Notify(nameof(SelectedCells));
+        Notify(nameof(SelectionRevision));
+    }
+
+    public IReadOnlyList<int> SelectedCellIndices()
+    {
+        if (_selectedCells.Count > 0)
+            return _selectedCells.ToList();
+        if (_selectedCell > 0)
+            return [_selectedCell];
+        return [];
+    }
+
+    public void SelectCellAt(int x, int y, bool additive)
+    {
+        if (_masks == null)
+            return;
+
+        var label = _masks.LabelAt(x, y);
+        if (label > 0)
+        {
+            if (additive)
+            {
+                var cells = _selectedCells.ToList();
+                if (!cells.Contains(label))
+                    cells.Add(label);
+                SetCellSelection(cells);
+            }
+            else
+            {
+                SetCellSelection([label]);
+            }
+
+            return;
+        }
+
+        if (!additive)
+            SetCellSelection([]);
+    }
+
+    public void SelectCellsInRect(int x0, int y0, int x1, int y1, bool additive)
+    {
+        if (_masks == null)
+            return;
+
+        var cells = MaskEditService.CellsFullyInRect(
+            _masks.Labels,
+            _masks.Width,
+            _masks.Height,
+            x0,
+            y0,
+            x1,
+            y1,
+            InstanceClasses.ParseFilter(_classFilterText),
+            InstanceClasses.Values);
+
+        if (additive)
+        {
+            var merged = _selectedCells.Concat(cells).Distinct().OrderBy(c => c).ToList();
+            SetCellSelection(merged);
+        }
+        else
+        {
+            SetCellSelection(cells);
+        }
+    }
+
+    public Task DeleteSelectedCellsAsync()
+    {
+        var cells = SelectedCellIndices();
+        return cells.Count == 0 ? Task.CompletedTask : RemoveCellsAsync(cells);
+    }
+
+    public void ApplyClassToSelectedCells(int classId)
+    {
+        foreach (var idx in SelectedCellIndices())
+        {
+            var row = idx - 1;
+            if (row >= 0)
+                SetInstanceClass(row, classId);
+        }
+    }
+
     public void RemoveCellAt(int x, int y, bool controlDown, bool altDown)
     {
         if (_masks == null)
@@ -851,9 +991,9 @@ public sealed class MainViewModel : ObservableObject
 
         if (altDown)
         {
-            if (_selectedCell <= 0)
+            if (SelectedCell <= 0)
                 return;
-            _ = MergeCellsAsync(label, _selectedCell);
+            _ = MergeCellsAsync(label, SelectedCell);
             return;
         }
 
@@ -876,7 +1016,7 @@ public sealed class MainViewModel : ObservableObject
             await Task.Yield();
             var updated = MaskEditService.RemoveCells(_session.Masks, indices);
             ApplyMaskUpdate(updated);
-            SelectedCell = 0;
+            SetCellSelection([]);
             SaveSessionIfNeeded();
         });
     }
