@@ -124,7 +124,7 @@ def read_session(path: str | os.PathLike[str]) -> SessionData:
     """Read session data from a `.cellpose` zip archive."""
     path = Path(path)
     with zipfile.ZipFile(path, "r") as zf:
-        manifest = json.loads(zf.read(_MANIFEST_NAME).decode("utf-8"))
+        manifest = json.loads(zf.read(_MANIFEST_NAME).decode("utf-8-sig"))
         if manifest.get("version") != SESSION_FORMAT_VERSION:
             raise ValueError(
                 f"Unsupported session format version: {manifest.get('version')}"

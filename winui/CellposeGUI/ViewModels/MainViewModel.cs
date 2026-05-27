@@ -498,7 +498,12 @@ public sealed class MainViewModel : ObservableObject
 
     public void SetInstanceVisible(int row, bool visible)
     {
+        if (row < 0 || row >= InstanceVisibility.Values.Count || InstanceVisibility.Values[row] == visible)
+            return;
+
         InstanceVisibility.SetVisible(row, visible);
+        InstanceRowsRevision++;
+        Notify(nameof(InstanceRowsRevision));
         Notify(nameof(AllInstancesVisible));
         NotifyCanvasChanged();
     }
@@ -1006,10 +1011,14 @@ public sealed class MainViewModel : ObservableObject
                 strokes,
                 _defaultClassId);
             if (updated == null)
+            {
+                StatusMessage = "Cell not added";
                 return;
+            }
 
             ApplyMaskUpdate(updated, appendedClassId: _defaultClassId);
             SaveSessionIfNeeded();
+            StatusMessage = $"Added cell {Ncells}";
         });
     }
 
@@ -1191,6 +1200,8 @@ public sealed class MainViewModel : ObservableObject
             RunOnUi(() =>
             {
                 IsBusy = false;
+                if (StatusMessage == message)
+                    StatusMessage = "Ready";
                 NotifyCanvasChanged();
             });
         }

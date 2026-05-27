@@ -66,3 +66,22 @@ def test_unsupported_version(tmp_path):
         zf.writestr("manifest.json", json.dumps({"version": 99}))
     with pytest.raises(ValueError, match="Unsupported session format version"):
         read_session(path)
+
+
+def test_read_manifest_with_utf8_bom(tmp_path):
+    masks = np.zeros((4, 4), dtype=np.uint16)
+    path = tmp_path / "bom_seg.cellpose"
+    write_session(
+        path,
+        SessionData(source_image="img.png", masks=masks),
+    )
+    with zipfile.ZipFile(path, "r") as zf_in:
+        entries = {name: zf_in.read(name) for name in zf_in.namelist()}
+    entries["manifest.json"] = b"\xef\xbb\xbf" + entries["manifest.json"]
+    with zipfile.ZipFile(path, "w", compression=zipfile.ZIP_DEFLATED) as zf_out:
+        for name, data in entries.items():
+            zf_out.writestr(name, data)
+
+    loaded = read_session(path)
+    assert loaded.source_image.endswith("img.png")
+    assert np.array_equal(loaded.masks, masks)

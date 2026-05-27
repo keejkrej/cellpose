@@ -102,10 +102,7 @@
                     <Grid Padding="4,0,8,0" ColumnDefinitions="52,60,*">
                         <CheckBox
                             Grid.Column="0"
-                            Width="20"
-                            Height="20"
-                            HorizontalAlignment="Center"
-                            VerticalAlignment="Center"
+                            Style="{StaticResource InstanceVisibilityCheckBoxStyle}"
                             IsThreeState="True"
                             IsChecked="{x:Bind ViewModel.AllInstancesVisible, Mode=TwoWay}" />
                         <TextBlock
@@ -133,18 +130,17 @@
                         SelectionMode="Extended"
                         LoadingRow="InstanceGrid_LoadingRow">
                         <controls:DataGrid.Columns>
-                            <controls:DataGridTemplateColumn Width="52" MinWidth="52">
-                                <controls:DataGridTemplateColumn.CellTemplate>
-                                    <DataTemplate x:DataType="vm:InstanceRowViewModel">
-                                        <CheckBox
-                                            Width="20"
-                                            Height="20"
-                                            HorizontalAlignment="Center"
-                                            VerticalAlignment="Center"
-                                            IsChecked="{x:Bind Visible, Mode=TwoWay}" />
-                                    </DataTemplate>
-                                </controls:DataGridTemplateColumn.CellTemplate>
-                            </controls:DataGridTemplateColumn>
+                            <controls:DataGridCheckBoxColumn
+                                Width="52"
+                                MinWidth="52"
+                                Binding="{Binding Visible, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}">
+                                <controls:DataGridCheckBoxColumn.ElementStyle>
+                                    <Style TargetType="CheckBox" BasedOn="{StaticResource InstanceVisibilityCheckBoxStyle}" />
+                                </controls:DataGridCheckBoxColumn.ElementStyle>
+                                <controls:DataGridCheckBoxColumn.EditingElementStyle>
+                                    <Style TargetType="CheckBox" BasedOn="{StaticResource InstanceVisibilityCheckBoxStyle}" />
+                                </controls:DataGridCheckBoxColumn.EditingElementStyle>
+                            </controls:DataGridCheckBoxColumn>
                             <controls:DataGridTextColumn
                                 Width="60"
                                 Binding="{Binding RoiLabel}"

@@ -9,6 +9,7 @@ namespace CellposeGUI.Services;
 
 public sealed class CellposeSessionStore
 {
+    private static readonly UTF8Encoding Utf8NoBom = new(encoderShouldEmitUTF8Identifier: false);
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
@@ -53,7 +54,7 @@ public sealed class CellposeSessionStore
 
         var manifestEntry = archive.CreateEntry("manifest.json", CompressionLevel.Optimal);
         using (var stream = manifestEntry.Open())
-        using (var writer = new StreamWriter(stream, Encoding.UTF8))
+        using (var writer = new StreamWriter(stream, Utf8NoBom))
             writer.Write(JsonSerializer.Serialize(manifest, JsonOptions));
     }
 

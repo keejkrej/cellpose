@@ -1,8 +1,9 @@
+using System.ComponentModel;
 using CellposeGUI.Models;
 
 namespace CellposeGUI.ViewModels;
 
-public sealed class InstanceRowViewModel
+public sealed class InstanceRowViewModel : INotifyPropertyChanged
 {
     private readonly MainViewModel _viewModel;
     private readonly int _row;
@@ -13,12 +14,21 @@ public sealed class InstanceRowViewModel
         _row = row;
     }
 
+    public event PropertyChangedEventHandler? PropertyChanged;
+
     public string RoiLabel => (_row + 1).ToString();
 
     public bool Visible
     {
         get => _row < _viewModel.InstanceVisibility.Values.Count && _viewModel.InstanceVisibility.Values[_row];
-        set => _viewModel.SetInstanceVisible(_row, value);
+        set
+        {
+            if (Visible == value)
+                return;
+
+            _viewModel.SetInstanceVisible(_row, value);
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Visible)));
+        }
     }
 
     public double ClassId
