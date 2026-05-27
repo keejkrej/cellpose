@@ -30,15 +30,6 @@
                 </StackPanel>
             </Expander>
 
-            <Expander Header="Drawing" IsExpanded="True" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
-                <StackPanel Spacing="8" HorizontalAlignment="Stretch">
-                    <ToggleSwitch x:Name="ShowMasksToggle" Header="masks" />
-                    <ToggleSwitch x:Name="ShowOutlinesToggle" Header="outlines" />
-                    <ToggleSwitch x:Name="AutosaveToggle" Header="auto" />
-                    <NumberBox x:Name="DefaultClassBox" Header="default class" HorizontalAlignment="Stretch" SpinButtonPlacementMode="Inline" />
-                </StackPanel>
-            </Expander>
-
             <Expander Header="Instances" IsExpanded="True" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
                 <StackPanel Spacing="8" HorizontalAlignment="Stretch">
                     <TextBox x:Name="ClassFilterBox" Header="class filter" PlaceholderText="all" HorizontalAlignment="Stretch" />

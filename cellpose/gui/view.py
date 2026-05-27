@@ -464,7 +464,7 @@ class MainView(QMainWindow):
         self.drawBox = QGroupBox("Drawing")
         self.drawBoxV = QVBoxLayout()
         self.drawBox.setLayout(self.drawBoxV)
-        self.right_sidebar.addWidget(self.drawBox, 1, 0, 1, 1)
+        self.left_sidebar.addWidget(self.drawBox, b, 0, 1, 9)
 
         self.brush_size = 1
 

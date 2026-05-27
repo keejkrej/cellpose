@@ -40,6 +40,15 @@
                     </Grid>
                 </StackPanel>
             </Expander>
+
+            <Expander Header="Drawing" IsExpanded="True" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
+                <StackPanel Spacing="8" HorizontalAlignment="Stretch">
+                    <ToggleSwitch x:Name="ShowMasksToggle" Header="masks" />
+                    <ToggleSwitch x:Name="ShowOutlinesToggle" Header="outlines" />
+                    <ToggleSwitch x:Name="AutosaveToggle" Header="auto" />
+                    <NumberBox x:Name="DefaultClassBox" Header="default class" HorizontalAlignment="Stretch" SpinButtonPlacementMode="Inline" />
+                </StackPanel>
+            </Expander>
         </StackPanel>
     </ScrollViewer>
 </UserControl>

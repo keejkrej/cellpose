@@ -91,30 +91,6 @@ public sealed partial class RightSidebarView : UserControl
                 await _viewModel.RunSegmentationAsync();
         };
 
-        ShowMasksToggle.Toggled += (_, _) =>
-        {
-            if (_viewModel != null)
-                _viewModel.ShowMasks = ShowMasksToggle.IsOn;
-        };
-
-        ShowOutlinesToggle.Toggled += (_, _) =>
-        {
-            if (_viewModel != null)
-                _viewModel.ShowOutlines = ShowOutlinesToggle.IsOn;
-        };
-
-        AutosaveToggle.Toggled += (_, _) =>
-        {
-            if (_viewModel != null)
-                _viewModel.Autosave = AutosaveToggle.IsOn;
-        };
-
-        DefaultClassBox.ValueChanged += (_, e) =>
-        {
-            if (_viewModel != null)
-                _viewModel.DefaultClassId = (int)e.NewValue;
-        };
-
         ClassFilterBox.TextChanged += (_, _) =>
         {
             if (_viewModel != null)
@@ -136,10 +112,6 @@ public sealed partial class RightSidebarView : UserControl
         PercentileHighBox.Value = _viewModel.SegmentationParams.PercentileHigh;
         NiterBox.Value = _viewModel.SegmentationParams.Niter;
 
-        ShowMasksToggle.IsOn = _viewModel.ShowMasks;
-        ShowOutlinesToggle.IsOn = _viewModel.ShowOutlines;
-        AutosaveToggle.IsOn = _viewModel.Autosave;
-        DefaultClassBox.Value = _viewModel.DefaultClassId;
         ClassFilterBox.Text = _viewModel.ClassFilterText;
 
         RunSegmentationButton.IsEnabled = _viewModel.CanRunSegmentation;
