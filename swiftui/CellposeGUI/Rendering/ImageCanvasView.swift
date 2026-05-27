@@ -9,6 +9,7 @@ struct ImageCanvasView: NSViewRepresentable {
         let view = ImageCanvasNSView()
         view.onClick = { point in
             if viewModel.brushMode {
+                // First click starts; second click completes (hover only extends preview).
                 if viewModel.inStroke {
                     Task { await viewModel.completeStroke(at: Int(point.x), y: Int(point.y)) }
                 } else {

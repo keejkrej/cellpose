@@ -232,6 +232,7 @@ class ImageDraw(pg.ImageItem):
                     drawing.in_stroke = True
                     self.drawAt(ev.pos(), ev)
                 else:
+                    # Second click closes the stroke; hover only extends preview.
                     ev.accept()
                     self.drawAt(ev.pos(), ev)
                     self.end_stroke()
@@ -268,10 +269,9 @@ class ImageDraw(pg.ImageItem):
         return
 
     def hoverEvent(self, ev):
+        # Extend preview while drawing; never auto-close on proximity to start.
         if self.parent.model.drawing.in_stroke:
             self.drawAt(ev.pos())
-            if self.is_at_start(ev.pos()):
-                self.end_stroke()
 
     def create_start(self, pos):
         self.scatter = pg.ScatterPlotItem(
@@ -283,24 +283,6 @@ class ImageDraw(pg.ImageItem):
             brush=None,
         )
         self.parent.p0.addItem(self.scatter)
-
-    def is_at_start(self, pos):
-        drawing = self.parent.model.drawing
-        thresh_out = max(6, self.parent.brush_size * 3)
-        thresh_in = max(3, self.parent.brush_size * 1.8)
-        if len(drawing.current_stroke) > 3:
-            stroke = np.array(drawing.current_stroke)
-            dist = (
-                ((stroke[1:, 1:] - stroke[:1, 1:][np.newaxis, :, :]) ** 2).sum(axis=-1)
-            ) ** 0.5
-            dist = dist.flatten()
-            has_left = (dist > thresh_out).nonzero()[0]
-            if len(has_left) > 0:
-                first_left = np.sort(has_left)[0]
-                has_returned = (dist[max(4, first_left + 1) :] < thresh_in).sum()
-                return has_returned > 0
-            return False
-        return False
 
     def end_stroke(self):
         drawing = self.parent.model.drawing

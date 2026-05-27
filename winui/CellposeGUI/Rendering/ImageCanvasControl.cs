@@ -538,6 +538,7 @@ public sealed class ImageCanvasControl : Grid
 
         if (_viewModel.BrushMode && point.Properties.IsLeftButtonPressed)
         {
+            // First click starts; second click completes (hover/move only extends preview).
             if (_viewModel.InStroke)
             {
                 _ = _viewModel.CompleteStrokeAsync((int)imagePoint.X, (int)imagePoint.Y);
