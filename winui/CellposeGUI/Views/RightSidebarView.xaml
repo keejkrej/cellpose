@@ -1,9 +1,13 @@
 <?xml version="1.0" encoding="utf-8" ?>
 <UserControl
     x:Class="CellposeGUI.Views.RightSidebarView"
+    x:DataType="local:RightSidebarView"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:controls="using:CommunityToolkit.WinUI.UI.Controls"
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:local="using:CellposeGUI.Views"
+    xmlns:vm="using:CellposeGUI.ViewModels"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     HorizontalAlignment="Stretch"
     HorizontalContentAlignment="Stretch"
@@ -12,37 +16,106 @@
         <StackPanel Padding="8" Spacing="8" HorizontalAlignment="Stretch">
             <Expander Header="Segmentation" IsExpanded="True" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
                 <StackPanel Spacing="8" HorizontalAlignment="Stretch">
-                    <ComboBox x:Name="ModelCombo" Header="model" HorizontalAlignment="Stretch" />
-                    <NumberBox x:Name="DiameterBox" Header="diameter" HorizontalAlignment="Stretch" SpinButtonPlacementMode="Inline" />
-                    <NumberBox x:Name="FlowThresholdBox" Header="flow threshold" HorizontalAlignment="Stretch" SpinButtonPlacementMode="Inline" />
-                    <NumberBox x:Name="CellprobThresholdBox" Header="cellprob threshold" HorizontalAlignment="Stretch" SpinButtonPlacementMode="Inline" />
-                    <NumberBox x:Name="PercentileLowBox" Header="norm percentile lower" HorizontalAlignment="Stretch" SpinButtonPlacementMode="Inline" />
-                    <NumberBox x:Name="PercentileHighBox" Header="norm percentile upper" HorizontalAlignment="Stretch" SpinButtonPlacementMode="Inline" />
-                    <NumberBox x:Name="NiterBox" Header="niter dynamics" HorizontalAlignment="Stretch" SpinButtonPlacementMode="Inline" />
+                    <ComboBox
+                        Header="model"
+                        HorizontalAlignment="Stretch"
+                        ItemsSource="{x:Bind ViewModel.Models, Mode=OneWay}"
+                        SelectedIndex="{x:Bind ViewModel.SelectedModelIndex, Mode=TwoWay}" />
+                    <NumberBox
+                        Header="diameter"
+                        HorizontalAlignment="Stretch"
+                        SpinButtonPlacementMode="Inline"
+                        Value="{x:Bind ViewModel.SegmentationParams.Diameter, Mode=TwoWay}" />
+                    <NumberBox
+                        Header="flow threshold"
+                        HorizontalAlignment="Stretch"
+                        SmallChange="0.1"
+                        SpinButtonPlacementMode="Inline"
+                        Value="{x:Bind ViewModel.SegmentationParams.FlowThreshold, Mode=TwoWay}" />
+                    <NumberBox
+                        Header="cellprob threshold"
+                        HorizontalAlignment="Stretch"
+                        SmallChange="0.1"
+                        SpinButtonPlacementMode="Inline"
+                        Value="{x:Bind ViewModel.SegmentationParams.CellprobThreshold, Mode=TwoWay}" />
+                    <NumberBox
+                        Header="norm percentile lower"
+                        HorizontalAlignment="Stretch"
+                        Maximum="100"
+                        Minimum="0"
+                        SmallChange="1"
+                        SpinButtonPlacementMode="Inline"
+                        Value="{x:Bind ViewModel.SegmentationParams.PercentileLow, Mode=TwoWay}" />
+                    <NumberBox
+                        Header="norm percentile upper"
+                        HorizontalAlignment="Stretch"
+                        Maximum="100"
+                        Minimum="0"
+                        SmallChange="1"
+                        SpinButtonPlacementMode="Inline"
+                        Value="{x:Bind ViewModel.SegmentationParams.PercentileHigh, Mode=TwoWay}" />
+                    <NumberBox
+                        Header="niter dynamics"
+                        HorizontalAlignment="Stretch"
+                        SmallChange="1"
+                        SpinButtonPlacementMode="Inline"
+                        Value="{x:Bind ViewModel.SegmentationParams.Niter, Mode=TwoWay}" />
                     <Grid HorizontalAlignment="Stretch">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="*" />
                         </Grid.ColumnDefinitions>
-                        <Button x:Name="RunSegmentationButton" Content="run" />
-                        <ProgressBar x:Name="RunProgressBar" Grid.Column="1" Margin="8,0,0,0" Maximum="1" HorizontalAlignment="Stretch" />
+                        <Button
+                            Content="run"
+                            Click="{x:Bind ViewModel.RunSegmentationInvoked}"
+                            IsEnabled="{x:Bind ViewModel.CanRunSegmentation, Mode=OneWay}" />
+                        <ProgressBar
+                            Grid.Column="1"
+                            Margin="8,0,0,0"
+                            Maximum="1"
+                            HorizontalAlignment="Stretch"
+                            Opacity="{x:Bind ViewModel.RunProgressOpacity, Mode=OneWay}"
+                            Value="{x:Bind ViewModel.Progress, Mode=OneWay}" />
                     </Grid>
                 </StackPanel>
             </Expander>
 
             <Expander Header="Instances" IsExpanded="True" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
                 <StackPanel Spacing="8" HorizontalAlignment="Stretch">
-                    <TextBox x:Name="ClassFilterBox" Header="class filter" PlaceholderText="all" HorizontalAlignment="Stretch" />
-                    <ListView x:Name="InstanceList" MinHeight="120" HorizontalAlignment="Stretch">
-                        <ListView.ItemTemplate>
-                            <DataTemplate>
-                                <Grid ColumnDefinitions="60,*" Padding="0,2" HorizontalAlignment="Stretch">
-                                    <TextBlock Text="{Binding RoiLabel}" />
-                                    <NumberBox Grid.Column="1" Value="{Binding ClassId, Mode=TwoWay}" HorizontalAlignment="Stretch" SpinButtonPlacementMode="Inline" />
-                                </Grid>
-                            </DataTemplate>
-                        </ListView.ItemTemplate>
-                    </ListView>
+                    <TextBox
+                        Header="class filter"
+                        PlaceholderText="all"
+                        HorizontalAlignment="Stretch"
+                        Text="{x:Bind ViewModel.ClassFilterText, Mode=TwoWay}" />
+                    <controls:DataGrid
+                        x:Name="InstanceGrid"
+                        MinHeight="120"
+                        HorizontalAlignment="Stretch"
+                        AutoGenerateColumns="False"
+                        CanUserReorderColumns="False"
+                        CanUserSortColumns="False"
+                        GridLinesVisibility="Horizontal"
+                        HeadersVisibility="Column"
+                        SelectionMode="Extended">
+                        <controls:DataGrid.Columns>
+                            <controls:DataGridTextColumn
+                                Header="ROI"
+                                Width="60"
+                                Binding="{Binding RoiLabel}"
+                                IsReadOnly="True" />
+                            <controls:DataGridTemplateColumn Header="Class ID" Width="*">
+                                <controls:DataGridTemplateColumn.CellTemplate>
+                                    <DataTemplate x:DataType="vm:InstanceRowViewModel">
+                                        <NumberBox
+                                            Margin="0,2"
+                                            HorizontalAlignment="Stretch"
+                                            SpinButtonPlacementMode="Inline"
+                                            Value="{x:Bind ClassId, Mode=TwoWay}" />
+                                    </DataTemplate>
+                                </controls:DataGridTemplateColumn.CellTemplate>
+                            </controls:DataGridTemplateColumn>
+                        </controls:DataGrid.Columns>
+                    </controls:DataGrid>
                 </StackPanel>
             </Expander>
         </StackPanel>

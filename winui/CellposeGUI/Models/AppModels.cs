@@ -43,21 +43,117 @@ public abstract class ObservableObject : INotifyPropertyChanged
     }
 }
 
-public sealed class SegmentationParameters
+public sealed class SegmentationParameters : ObservableObject
 {
-    public double Diameter { get; set; }
-    public double FlowThreshold { get; set; } = 0.4;
-    public double CellprobThreshold { get; set; }
-    public double PercentileLow { get; set; } = 1;
-    public double PercentileHigh { get; set; } = 99;
-    public int Niter { get; set; }
-    public int MinSize { get; set; } = 15;
-    public double StitchThreshold { get; set; }
-    public double Anisotropy { get; set; } = 1;
+    private double _diameter;
+    private double _flowThreshold = 0.4;
+    private double _cellprobThreshold;
+    private double _percentileLow = 1;
+    private double _percentileHigh = 99;
+    private int _niter;
+    private int _minSize = 15;
+    private double _stitchThreshold;
+    private double _anisotropy = 1;
+    private double _flow3DSmooth;
+    private bool _do3D;
+
+    public double Diameter
+    {
+        get => _diameter;
+        set => SetProperty(ref _diameter, value);
+    }
+
+    public double FlowThreshold
+    {
+        get => _flowThreshold;
+        set => SetProperty(ref _flowThreshold, value);
+    }
+
+    public double CellprobThreshold
+    {
+        get => _cellprobThreshold;
+        set => SetProperty(ref _cellprobThreshold, value);
+    }
+
+    public double PercentileLow
+    {
+        get => _percentileLow;
+        set => SetProperty(ref _percentileLow, value);
+    }
+
+    public double PercentileHigh
+    {
+        get => _percentileHigh;
+        set => SetProperty(ref _percentileHigh, value);
+    }
+
+    public int Niter
+    {
+        get => _niter;
+        set => SetProperty(ref _niter, value);
+    }
+
+    public int MinSize
+    {
+        get => _minSize;
+        set => SetProperty(ref _minSize, value);
+    }
+
+    public double StitchThreshold
+    {
+        get => _stitchThreshold;
+        set => SetProperty(ref _stitchThreshold, value);
+    }
+
+    public double Anisotropy
+    {
+        get => _anisotropy;
+        set => SetProperty(ref _anisotropy, value);
+    }
+
     [JsonPropertyName("flow3D_smooth")]
-    public double Flow3DSmooth { get; set; }
+    public double Flow3DSmooth
+    {
+        get => _flow3DSmooth;
+        set => SetProperty(ref _flow3DSmooth, value);
+    }
+
     [JsonPropertyName("do_3D")]
-    public bool Do3D { get; set; }
+    public bool Do3D
+    {
+        get => _do3D;
+        set => SetProperty(ref _do3D, value);
+    }
+
+    public void CopyFrom(SegmentationParameters other)
+    {
+        Diameter = other.Diameter;
+        FlowThreshold = other.FlowThreshold;
+        CellprobThreshold = other.CellprobThreshold;
+        PercentileLow = other.PercentileLow;
+        PercentileHigh = other.PercentileHigh;
+        Niter = other.Niter;
+        MinSize = other.MinSize;
+        StitchThreshold = other.StitchThreshold;
+        Anisotropy = other.Anisotropy;
+        Flow3DSmooth = other.Flow3DSmooth;
+        Do3D = other.Do3D;
+    }
+
+    public SegmentationParameters Clone() => new()
+    {
+        Diameter = Diameter,
+        FlowThreshold = FlowThreshold,
+        CellprobThreshold = CellprobThreshold,
+        PercentileLow = PercentileLow,
+        PercentileHigh = PercentileHigh,
+        Niter = Niter,
+        MinSize = MinSize,
+        StitchThreshold = StitchThreshold,
+        Anisotropy = Anisotropy,
+        Flow3DSmooth = Flow3DSmooth,
+        Do3D = Do3D,
+    };
 }
 
 public sealed class DisplayParameters : ObservableObject

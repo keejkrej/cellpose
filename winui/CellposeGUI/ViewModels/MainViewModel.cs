@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using CellposeGUI.Models;
 using CellposeGUI.Services;
 using Microsoft.UI.Dispatching;
@@ -59,6 +60,8 @@ public sealed class MainViewModel : ObservableObject
         _dispatcher = dispatcher;
         BindDispatcher(dispatcher);
         SegmentationParams = new SegmentationParameters();
+        SegmentationParams.BindDispatcher(dispatcher);
+        SegmentationParams.PropertyChanged += OnSegmentationParamsChanged;
         DisplayParams = new DisplayParameters();
         DisplayParams.BindDispatcher(dispatcher);
         DisplayParams.PropertyChanged += (_, e) =>
@@ -155,8 +158,11 @@ public sealed class MainViewModel : ObservableObject
         {
             SetProperty(ref _isBusy, value);
             Notify(nameof(CanRunSegmentation));
+            Notify(nameof(RunProgressOpacity));
         }
     }
+
+    public double RunProgressOpacity => _isBusy ? 1 : 0;
 
     public double Progress
     {
@@ -308,11 +314,7 @@ public sealed class MainViewModel : ObservableObject
         _session.RecomputeMasks = loaded.RecomputeMasks;
         _session.Model = loaded.Model;
         _session.Segmentation = loaded.Segmentation;
-        SegmentationParams.Diameter = loaded.Segmentation.Diameter;
-        SegmentationParams.FlowThreshold = loaded.Segmentation.FlowThreshold;
-        SegmentationParams.CellprobThreshold = loaded.Segmentation.CellprobThreshold;
-        SegmentationParams.Niter = loaded.Segmentation.Niter;
-        SegmentationParams.MinSize = loaded.Segmentation.MinSize;
+        SegmentationParams.CopyFrom(loaded.Segmentation);
 
         Filename = loaded.ImagePath;
         Image = loaded.Image;
@@ -359,20 +361,7 @@ public sealed class MainViewModel : ObservableObject
             ApplyMaskUpdate(result.Masks);
     }
 
-    private SegmentationParameters CloneSegmentationParams() => new()
-    {
-        Diameter = SegmentationParams.Diameter,
-        FlowThreshold = SegmentationParams.FlowThreshold,
-        CellprobThreshold = SegmentationParams.CellprobThreshold,
-        PercentileLow = SegmentationParams.PercentileLow,
-        PercentileHigh = SegmentationParams.PercentileHigh,
-        Niter = SegmentationParams.Niter,
-        MinSize = SegmentationParams.MinSize,
-        StitchThreshold = SegmentationParams.StitchThreshold,
-        Anisotropy = SegmentationParams.Anisotropy,
-        Flow3DSmooth = SegmentationParams.Flow3DSmooth,
-        Do3D = SegmentationParams.Do3D,
-    };
+    private SegmentationParameters CloneSegmentationParams() => SegmentationParams.Clone();
 
     private void SaveSessionIfNeeded()
     {
@@ -590,6 +579,9 @@ public sealed class MainViewModel : ObservableObject
         });
     }
 
+    public async void RunSegmentationInvoked(object sender, RoutedEventArgs e) =>
+        await RunSegmentationAsync();
+
     public async Task RunSegmentationAsync()
     {
         if (_session.ImagePath == null)
@@ -623,6 +615,16 @@ public sealed class MainViewModel : ObservableObject
             StatusMessage = $"Recomputed {result.Ncells} cells";
             SaveSessionIfNeeded();
         });
+    }
+
+    private void OnSegmentationParamsChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName is nameof(SegmentationParameters.FlowThreshold)
+            or nameof(SegmentationParameters.CellprobThreshold)
+            or nameof(SegmentationParameters.Niter))
+        {
+            _ = RecomputeFromThresholdsAsync();
+        }
     }
 
     public Task ComputeSaturationAsync()
