@@ -34,7 +34,7 @@ struct AppCommands: Commands {
                 set: { viewModel?.autoloadMasks = $0 }
             ))
 
-            Toggle("Disable autosave _seg.npy file", isOn: Binding(
+            Toggle("Disable autosave _seg.cellpose file", isOn: Binding(
                 get: { viewModel?.disableAutosave ?? false },
                 set: { viewModel?.disableAutosave = $0 }
             ))
@@ -45,14 +45,14 @@ struct AppCommands: Commands {
             .keyboardShortcut("m", modifiers: [.command])
             .disabled(!(viewModel?.imageLoaded ?? false))
 
-            Button("Load processed/labelled image (*_seg.npy)") {
+            Button("Load processed/labelled image (*_seg.cellpose)") {
                 Task { await viewModel?.loadSegPanel() }
             }
             .keyboardShortcut("p", modifiers: [.command])
 
             Divider()
 
-            Button("Save masks and image (as *_seg.npy)") {
+            Button("Save masks and image (as *_seg.cellpose)") {
                 Task { await viewModel?.saveSeg() }
             }
             .keyboardShortcut("s", modifiers: [.command])

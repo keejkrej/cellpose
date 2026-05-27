@@ -23,10 +23,10 @@ struct CellposeGUIApp: App {
             .task {
                 await sidecarManager.startIfNeeded()
                 if viewModel == nil, sidecarManager.isReady {
-                    let engine = SidecarSegmentationEngine(
+                    let ml = SidecarMlEngine(
                         client: SidecarClient(baseURL: sidecarManager.baseURL)
                     )
-                    let model = MainViewModel(engine: engine)
+                    let model = MainViewModel(ml: ml)
                     await model.refreshModels()
                     viewModel = model
                 }

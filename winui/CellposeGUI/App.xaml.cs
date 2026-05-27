@@ -1,5 +1,7 @@
-using CellposeGUI.Services;
+using CellposeGUI.Models;
 using CellposeGUI.ViewModels;
+using Microsoft.UI.Dispatching;
+using CellposeGUI.Services;
 using CellposeGUI.Views;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -64,8 +66,15 @@ public partial class App : Application
                 return;
             }
 
-            var engine = new SidecarSegmentationEngine(new SidecarClient(_sidecarManager.BaseUri));
-            var viewModel = new MainViewModel(engine, dispatcher);
+            var client = new SidecarClient(_sidecarManager.BaseUri);
+            var ml = new SidecarMlEngine(client);
+            var viewModel = new MainViewModel(
+                ml,
+                new ImageLoaderService(),
+                new CellposeSessionStore(),
+                new SeriesDiscoveryService(),
+                new ExportService(),
+                dispatcher);
             await viewModel.RefreshModelsAsync().ConfigureAwait(false);
 
             dispatcher.TryEnqueue(() =>

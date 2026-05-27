@@ -39,30 +39,30 @@ class SegmentationParams(BaseModel):
     do_3D: bool = False
 
 
-class PreprocessParams(BaseModel):
-    sharpen_radius: float = 0.0
-    smooth_radius: float = 0.0
-    tile_norm_blocksize: float = 0.0
-    tile_norm_smooth3D: float = 1.0
-    norm3D: bool = True
-    invert: bool = False
-    percentile_low: float = 1.0
-    percentile_high: float = 99.0
-
-
-class SegmentRequest(BaseModel):
-    session_id: str | None = None
+class InferRequest(BaseModel):
+    path: str | None = None
     image: ArrayPayload | None = None
-    filename: str | None = None
+    load_3D: bool = False
     model_name: str | None = None
     custom_model: bool = False
     params: SegmentationParams = Field(default_factory=SegmentationParams)
-    preprocess: PreprocessParams = Field(default_factory=PreprocessParams)
 
 
-class RecomputeRequest(BaseModel):
-    session_id: str
+class InferResponse(BaseModel):
+    masks: ArrayPayload | None = None
+    flows: list[ArrayPayload] = Field(default_factory=list)
+    ncells: int = 0
+    recompute_masks: bool = False
+
+
+class RecomputeFlowsRequest(BaseModel):
+    flows: list[ArrayPayload]
     params: SegmentationParams = Field(default_factory=SegmentationParams)
+
+
+class RecomputeResponse(BaseModel):
+    masks: ArrayPayload | None = None
+    ncells: int = 0
 
 
 class SessionResponse(BaseModel):

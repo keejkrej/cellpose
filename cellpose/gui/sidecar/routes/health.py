@@ -15,11 +15,14 @@ router = APIRouter(tags=["health"])
 
 @router.get("/health", response_model=HealthResponse)
 def health() -> HealthResponse:
+    device = None
+    if _MODEL is not None:
+        device = model_device()
     return HealthResponse(
         status="ok",
         version=version_str,
         model_loaded=_MODEL is not None,
-        device=model_device() if _MODEL is not None else None,
+        device=device,
     )
 
 

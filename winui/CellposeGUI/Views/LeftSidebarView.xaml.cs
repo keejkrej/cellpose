@@ -49,12 +49,6 @@ public sealed partial class LeftSidebarView : UserControl
             _viewModel.ViewMode = mode;
         };
 
-        Norm3DToggle.Toggled += (_, _) =>
-        {
-            if (_viewModel != null)
-                _viewModel.PreprocessingParams.Norm3D = Norm3DToggle.IsOn;
-        };
-
         AutoSaturationButton.Click += async (_, _) =>
         {
             if (_viewModel != null)
@@ -79,43 +73,6 @@ public sealed partial class LeftSidebarView : UserControl
             var high = Math.Max(e.NewValue, _viewModel.DisplayParams.GrayLow + 1);
             _viewModel.DisplayParams.GrayHigh = Math.Min(255, high);
             UpdateGraySliderLabels();
-        };
-
-        SharpenRadiusBox.ValueChanged += (_, e) =>
-        {
-            if (_viewModel != null)
-                _viewModel.PreprocessingParams.SharpenRadius = e.NewValue;
-        };
-
-        SmoothRadiusBox.ValueChanged += (_, e) =>
-        {
-            if (_viewModel != null)
-                _viewModel.PreprocessingParams.SmoothRadius = e.NewValue;
-        };
-
-        TileNormBlocksizeBox.ValueChanged += (_, e) =>
-        {
-            if (_viewModel != null)
-                _viewModel.PreprocessingParams.TileNormBlocksize = e.NewValue;
-        };
-
-        TileNormSmooth3DBox.ValueChanged += (_, e) =>
-        {
-            if (_viewModel != null)
-                _viewModel.PreprocessingParams.TileNormSmooth3D = e.NewValue;
-        };
-
-        SaveRestoredToggle.Toggled += (_, _) =>
-        {
-            if (_viewModel != null)
-                _viewModel.SaveRestoredImage = SaveRestoredToggle.IsOn;
-        };
-
-        ResetPreprocessButton.Click += (_, _) => _viewModel?.ClearRestore();
-        ApplyPreprocessButton.Click += async (_, _) =>
-        {
-            if (_viewModel != null)
-                await _viewModel.ApplyPreprocessingAsync();
         };
     }
 
@@ -236,29 +193,9 @@ public sealed partial class LeftSidebarView : UserControl
         if (_viewModel == null)
             return;
 
-        ViewModeCombo.Items.Clear();
-        foreach (var mode in ViewModeExtensions.All)
-        {
-            ViewModeCombo.Items.Add(new ComboBoxItem
-            {
-                Content = mode.Title(),
-                Tag = mode,
-                IsEnabled = mode != ViewMode.Restored || _viewModel.HasRestoredView,
-            });
-        }
-        ViewModeCombo.SelectedIndex = Array.IndexOf(ViewModeExtensions.All, _viewModel.ViewMode);
-
-        Norm3DToggle.IsOn = _viewModel.PreprocessingParams.Norm3D;
+        RefreshViewModeCombo();
         SyncGraySliders();
-
-        SharpenRadiusBox.Value = _viewModel.PreprocessingParams.SharpenRadius;
-        SmoothRadiusBox.Value = _viewModel.PreprocessingParams.SmoothRadius;
-        TileNormBlocksizeBox.Value = _viewModel.PreprocessingParams.TileNormBlocksize;
-        TileNormSmooth3DBox.Value = _viewModel.PreprocessingParams.TileNormSmooth3D;
-        SaveRestoredToggle.IsOn = _viewModel.SaveRestoredImage;
-
         UpdateControlStates();
-
         RefreshAxisRows();
     }
 
@@ -294,8 +231,6 @@ public sealed partial class LeftSidebarView : UserControl
         AutoSaturationButton.IsEnabled = _viewModel.ImageLoaded && !_viewModel.IsBusy;
         GrayLowSlider.IsEnabled = _viewModel.ImageLoaded;
         GrayHighSlider.IsEnabled = _viewModel.ImageLoaded;
-        ResetPreprocessButton.IsEnabled = _viewModel.ImageLoaded;
-        ApplyPreprocessButton.IsEnabled = _viewModel.ImageLoaded && !_viewModel.IsBusy;
     }
 
     private void RefreshViewModeCombo()
@@ -310,10 +245,10 @@ public sealed partial class LeftSidebarView : UserControl
             {
                 Content = mode.Title(),
                 Tag = mode,
-                IsEnabled = mode != ViewMode.Restored || _viewModel.HasRestoredView,
+                IsEnabled = mode == ViewMode.Image,
             });
         }
-        ViewModeCombo.SelectedIndex = Array.IndexOf(ViewModeExtensions.All, _viewModel.ViewMode);
+        ViewModeCombo.SelectedIndex = Math.Max(0, Array.IndexOf(ViewModeExtensions.All, _viewModel.ViewMode));
     }
 
     private void OnDisplayParamsChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
@@ -330,7 +265,6 @@ public sealed partial class LeftSidebarView : UserControl
             case nameof(MainViewModel.IsBusy):
                 UpdateControlStates();
                 break;
-            case nameof(MainViewModel.HasRestoredView):
             case nameof(MainViewModel.ViewMode):
                 RefreshViewModeCombo();
                 break;

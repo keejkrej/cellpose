@@ -1,6 +1,6 @@
 # Cellpose WinUI GUI (Windows)
 
-Native Windows WinUI 3 front-end for Cellpose, backed by the same local Python sidecar used by the macOS SwiftUI app.
+Native Windows WinUI 3 front-end for Cellpose. The app owns image I/O, mask editing, export, series navigation, and session files locally. A slim Python sidecar handles ML only (inference, flow-based recompute, training, model registry).
 
 ## Requirements
 
@@ -40,25 +40,35 @@ Set environment variables if needed:
 
 ## Architecture
 
-- **WinUI app** (`winui/CellposeGUI/`): 3-column layout, image canvas, menus, editing
-- **ISegmentationEngine**: abstraction for future on-device backend
-- **SidecarSegmentationEngine**: HTTP client to Python sidecar
-- **Python sidecar** (`cellpose/gui/sidecar/`): FastAPI server wrapping `CellposeModel.eval`, I/O, mask editing, training
-
-The sidecar is shared with the macOS app — no duplicate Python backend.
-
-## Features
-
-- Load images (TIFF, PNG, JPG) and `_seg.npy` state files
-- Run CPSAM / custom model segmentation
-- Mask overlay with select (click), remove (Ctrl+click), merge (Alt+click)
-- Shift+drag drawing to add cells
-- Save `_seg.npy`, export masks PNG/TIF
-- Folder series discovery and navigation
-- Preprocessing panel and live mask recompute from cached flows
-- Train new model dialog and custom model management
-- Drag-and-drop file loading
+- **WinUI app** (`winui/CellposeGUI/`): UI, canvas, local session state, mask editing, export, series discovery
+- **Local services**: `ImageLoaderService`, `CellposeSessionStore`, `MaskEditService`, `SeriesDiscoveryService`, `ExportService`
+- **IMlInferenceEngine** / **SidecarMlEngine**: HTTP client for ML-only sidecar endpoints
+- **Python sidecar** (`cellpose/gui/sidecar/`): stateless `/infer`, `/recompute`, `/train`, `/models`
+- **Session format** (`cellpose/gui/session_format/`): portable `{stem}_seg.cellpose` zip archives (manifest + raw arrays)
 
 ## Sidecar API
 
-See `macos/README.md` for the full HTTP API table. The sidecar binds to `127.0.0.1` only.
+| Endpoint | Description |
+|----------|-------------|
+| `GET /health` | Health check |
+| `GET /models` | List models |
+| `POST /infer` | Run segmentation on image path or array |
+| `POST /recompute` | Recompute masks from cached flows |
+| `POST /train` | Train custom model from `*_seg.cellpose` labels |
+| `POST /models/add` | Install custom model |
+| `POST /models/remove` | Remove custom model |
+
+Sidecar binds to `127.0.0.1` only.
+
+## Features
+
+- Load images (TIFF, PNG, JPG) locally
+- Save/load `{stem}_seg.cellpose` session files
+- Run CPSAM / custom model segmentation via sidecar
+- Mask overlay with select (click), remove (Ctrl+click), merge (Alt+click)
+- Shift+drag drawing to add cells (local mask edit)
+- Live mask recompute from cached flows when thresholds change
+- Export masks PNG/TIF, outlines, flows, ROIs
+- Folder series discovery and navigation
+- Train new model dialog and custom model management
+- Drag-and-drop file loading

@@ -5,7 +5,6 @@ import Observation
 @MainActor
 @Observable
 final class MainViewModel {
-    var sessionID: String?
     var filename: String?
     var image: ImageData?
     var masks: MaskData?
@@ -16,9 +15,7 @@ final class MainViewModel {
     var autosave = true
     var autoloadMasks = false
     var disableAutosave = false
-    var saveRestoredImage = true
     var imageLoaded = false
-    var hasRestoredView = false
     var showLoadFolderSheet = false
     var showTrainDialog = false
     var pendingFolderURL: URL?
@@ -31,7 +28,6 @@ final class MainViewModel {
     var recomputeMasks = false
 
     var segmentationParams = SegmentationParameters()
-    var preprocessingParams = PreprocessingParameters()
     var displayParams = DisplayParameters()
     var trainingParams = TrainingParameters.createDefault(modelSaveFolder: "~/.cellpose/models/custom")
     var seriesState = SeriesState()
@@ -51,14 +47,18 @@ final class MainViewModel {
     var canSaveMasks: Bool { imageLoaded && ncells > 0 }
     var canRunSegmentation: Bool { imageLoaded && !isBusy }
 
-    private let engine: SegmentationEngine
-    private var undoRemovedCells: [(Int32, [Int32])] = []
+    private let ml: MlInferenceEngine
+    private let sessionStore = CellposeSessionStore()
+    private let seriesDiscovery = SeriesDiscoveryService()
+    private let exportService = ExportService()
+    private let session = SessionState()
+
+    private var seriesDataset: SeriesDatasetPayload?
     private var currentStroke: [[Double]] = []
     private var pendingStrokes: [[[Double]]] = []
-    private var seriesDataset: SeriesDatasetPayload?
 
-    init(engine: SegmentationEngine) {
-        self.engine = engine
+    init(ml: MlInferenceEngine) {
+        self.ml = ml
     }
 
     var filteredCellCount: Int {
@@ -66,21 +66,93 @@ final class MainViewModel {
         return instanceClasses.values.filter { $0 == filter }.count
     }
 
-    func applyResult(_ result: SegmentationResult) {
-        sessionID = result.sessionID
-        filename = result.filename
-        image = result.image
-        masks = result.masks
-        ncells = result.ncells
-        recomputeMasks = result.recomputeMasks
-        instanceClasses.replace(ncells: ncells)
+    func applyLoadedImage(path: String, image: ImageData) {
+        session.imagePath = path
+        session.image = image
+        session.masks = nil
+        session.flows = []
+        session.recomputeMasks = false
+        session.seriesDataset = seriesDataset
+
+        filename = path
+        self.image = image
+        masks = nil
+        ncells = 0
+        recomputeMasks = false
+        selectedCell = 0
+        instanceClasses.replace(ncells: 0)
         progress = 1
         imageLoaded = true
+        updateSaturationFromImage()
+    }
+
+    func applyLoadedSession(_ loaded: LoadedSession) {
+        session.imagePath = loaded.imagePath
+        session.image = loaded.image
+        session.masks = loaded.masks
+        session.flows = loaded.flows
+        session.recomputeMasks = loaded.recomputeMasks
+        session.model = loaded.model
+        session.segmentation = loaded.segmentation
+        segmentationParams = loaded.segmentation
+
+        filename = loaded.imagePath
+        image = loaded.image
+        masks = loaded.masks
+        ncells = loaded.masks.labels.isEmpty ? 0 : Int(loaded.masks.labels.max() ?? 0)
+        recomputeMasks = loaded.recomputeMasks
+        instanceClasses.replace(ncells: ncells)
+        selectedCell = 0
+        progress = 1
+        imageLoaded = true
+        updateSaturationFromImage()
+    }
+
+    func applyMaskUpdate(_ updated: MaskData) {
+        session.masks = updated
+        masks = updated
+        ncells = updated.labels.isEmpty ? 0 : Int(updated.labels.max() ?? 0)
+        instanceClasses.replace(ncells: ncells)
+    }
+
+    func applyInferenceResult(_ result: InferResult) {
+        session.flows = result.flows
+        session.recomputeMasks = result.recomputeMasks
+        session.model = selectedModel
+        session.segmentation = cloneSegmentationParams()
+        recomputeMasks = result.recomputeMasks
+        if let resultMasks = result.masks {
+            applyMaskUpdate(resultMasks)
+        }
+    }
+
+    private func cloneSegmentationParams() -> SegmentationParameters {
+        var copy = SegmentationParameters()
+        copy.diameter = segmentationParams.diameter
+        copy.flowThreshold = segmentationParams.flowThreshold
+        copy.cellprobThreshold = segmentationParams.cellprobThreshold
+        copy.percentileLow = segmentationParams.percentileLow
+        copy.percentileHigh = segmentationParams.percentileHigh
+        copy.niter = segmentationParams.niter
+        copy.minSize = segmentationParams.minSize
+        copy.stitchThreshold = segmentationParams.stitchThreshold
+        copy.anisotropy = segmentationParams.anisotropy
+        copy.flow3DSmooth = segmentationParams.flow3DSmooth
+        copy.do3D = segmentationParams.do3D
+        return copy
+    }
+
+    private func saveSessionIfNeeded() {
+        guard autosave, !disableAutosave, session.imagePath != nil, session.masks != nil else { return }
+        session.segmentation = cloneSegmentationParams()
+        session.model = selectedModel
+        let path = sessionStore.defaultPath(imagePath: session.imagePath!)
+        try? sessionStore.save(path: path, session: session)
     }
 
     func refreshModels() async {
         do {
-            let listed = try await engine.listModels()
+            let listed = try await ml.listModels()
             let custom = listed.custom.filter { $0.lowercased() != "cpsam" }
             models = ["CPSAM"] + custom
         } catch {
@@ -89,27 +161,31 @@ final class MainViewModel {
     }
 
     func loadImagePanel() async {
-        guard let url = pickFile(allowedTypes: ["tif", "tiff", "png", "jpg", "jpeg", "gif", "npy"]) else { return }
+        guard let url = pickFile(allowedTypes: ["tif", "tiff", "png", "jpg", "jpeg", "gif"]) else { return }
         await loadImage(path: url.path)
     }
 
     func loadImage(path: String) async {
         await runTask(message: "Loading image…") {
-            let result = try await self.engine.loadImage(path: path, load3D: false)
-            self.applyResult(result)
+            let loadedImage = try await Task.detached {
+                try ImageLoaderService().load(path: path)
+            }.value
+            self.applyLoadedImage(path: path, image: loadedImage)
             self.statusMessage = "Loaded \(URL(fileURLWithPath: path).lastPathComponent)"
         }
     }
 
     func loadSegPanel() async {
-        guard let url = pickFile(allowedTypes: ["npy"]) else { return }
+        guard let url = pickFile(allowedTypes: ["cellpose"]) else { return }
         await loadSeg(path: url.path)
     }
 
     func loadSeg(path: String) async {
         await runTask(message: "Loading segmentation…") {
-            let result = try await self.engine.loadSeg(path: path, load3D: false)
-            self.applyResult(result)
+            let loaded = try await Task.detached {
+                try CellposeSessionStore().load(path: path, imageLoader: ImageLoaderService())
+            }.value
+            self.applyLoadedSession(loaded)
             self.statusMessage = "Loaded \(URL(fileURLWithPath: path).lastPathComponent)"
         }
     }
@@ -119,11 +195,13 @@ final class MainViewModel {
         lastSeriesSubfolderTemplate = subfolderTemplate
         lastSeriesFilenameTemplate = filenameTemplate
         await runTask(message: "Discovering series…") {
-            let discovery = try await self.engine.discoverSeries(
-                folder: folderURL.path,
-                subfolderTemplate: subfolderTemplate,
-                filenameTemplate: filenameTemplate
-            )
+            let discovery = try await Task.detached {
+                try SeriesDiscoveryService().discover(
+                    folder: folderURL.path,
+                    subfolderTemplate: subfolderTemplate,
+                    filenameTemplate: filenameTemplate
+                )
+            }.value
             self.seriesDataset = discovery.dataset
             self.seriesState.folder = discovery.folder
             self.seriesState.subfolderTemplate = subfolderTemplate
@@ -135,11 +213,14 @@ final class MainViewModel {
             self.seriesState.axisSliderIndices = SeriesState.axisOrder.reduce(into: [:]) { result, axis in
                 result[axis] = 0
             }
+
             if let recordIndex = self.resolveCurrentSeriesRecordIndex() {
                 self.seriesState.recordIndex = recordIndex
                 let record = discovery.records[recordIndex]
-                let result = try await self.engine.loadImage(path: record.path, load3D: false)
-                self.applyResult(result)
+                let loadedImage = try await Task.detached {
+                    try ImageLoaderService().load(path: record.path)
+                }.value
+                self.applyLoadedImage(path: record.path, image: loadedImage)
             }
             self.statusMessage = "Loaded series with \(discovery.recordCount) records"
         }
@@ -153,7 +234,7 @@ final class MainViewModel {
 
     func fetchSeriesTemplateSuggestions(for folder: URL) async -> (subfolder: String, filename: String) {
         do {
-            let suggestion = try await engine.suggestSeriesTemplates(folder: folder.path)
+            let suggestion = try seriesDiscovery.suggestTemplates(folder: folder.path)
             return (suggestion.subfolderTemplate, suggestion.filenameTemplate)
         } catch {
             return (lastSeriesSubfolderTemplate, lastSeriesFilenameTemplate)
@@ -161,7 +242,7 @@ final class MainViewModel {
     }
 
     func navigateSeriesAxis(_ axis: String, delta: Int) async {
-        guard seriesState.isLoaded, var values = seriesState.axisValues[axis], !values.isEmpty else { return }
+        guard seriesState.isLoaded, let values = seriesState.axisValues[axis], !values.isEmpty else { return }
         let current = seriesState.axisSliderIndices[axis, default: 0]
         let next = max(0, min(values.count - 1, current + delta))
         guard next != current else { return }
@@ -170,9 +251,10 @@ final class MainViewModel {
     }
 
     func setSeriesAxisIndex(_ axis: String, index: Int) async {
-        guard seriesState.isLoaded, let values = seriesState.axisValues[axis], values.indices.contains(index) else {
-            return
-        }
+        guard seriesState.isLoaded,
+              let values = seriesState.axisValues[axis],
+              values.indices.contains(index)
+        else { return }
         seriesState.axisSliderIndices[axis] = index
         await loadCurrentSeriesRecord()
     }
@@ -185,8 +267,10 @@ final class MainViewModel {
         syncSeriesSlidersToRecordIndex()
         guard let record = seriesState.currentRecord else { return }
         await runTask(message: "Loading frame…") {
-            let result = try await self.engine.loadImage(path: record.path, load3D: false)
-            self.applyResult(result)
+            let loadedImage = try await Task.detached {
+                try ImageLoaderService().load(path: record.path)
+            }.value
+            self.applyLoadedImage(path: record.path, image: loadedImage)
             self.statusMessage = record.label
         }
     }
@@ -197,19 +281,17 @@ final class MainViewModel {
         seriesState.recordIndex = recordIndex
         guard let record = seriesState.currentRecord else { return }
         await runTask(message: "Loading frame…") {
-            let result = try await self.engine.loadImage(path: record.path, load3D: false)
-            self.applyResult(result)
+            let loadedImage = try await Task.detached {
+                try ImageLoaderService().load(path: record.path)
+            }.value
+            self.applyLoadedImage(path: record.path, image: loadedImage)
             self.statusMessage = record.label
         }
     }
 
     private func resolveCurrentSeriesRecordIndex() -> Int? {
         guard let dataset = seriesDataset, let lookup = dataset.lookup else { return nil }
-        let position = axisValue("position", in: dataset)
-        let time = axisValue("time", in: dataset)
-        let channel = axisValue("channel", in: dataset)
-        let z = axisValue("z", in: dataset)
-        let key = "\(position)_\(time)_\(channel)_\(z)"
+        let key = "\(axisValue("position", in: dataset))_\(axisValue("time", in: dataset))_\(axisValue("channel", in: dataset))_\(axisValue("z", in: dataset))"
         return lookup[key]
     }
 
@@ -248,76 +330,72 @@ final class MainViewModel {
         }
     }
 
-    func refreshInstanceFilter() {
-        // Triggers canvas redraw when class filter changes.
-    }
+    func refreshInstanceFilter() {}
 
     func runSegmentation() async {
-        guard let sessionID else { return }
+        guard session.imagePath != nil else { return }
         await runTask(message: "Running segmentation…", showProgress: true) {
             self.progress = 0.1
-            let result = try await self.engine.segment(
-                sessionID: sessionID,
-                imagePayload: nil,
-                filename: self.filename,
+            let result = try await self.ml.infer(
+                imagePath: self.session.imagePath!,
                 modelName: self.selectedModel,
                 customModel: self.isCustomModel,
-                params: self.segmentationParams,
-                preprocess: self.preprocessingParams
+                params: self.segmentationParams
             )
             self.progress = 1
-            self.applyResult(result)
+            self.applyInferenceResult(result)
             self.statusMessage = "Found \(result.ncells) cells"
-            if self.autosave && !self.disableAutosave {
-                _ = try await self.engine.saveSeg(sessionID: result.sessionID, path: nil)
-            }
+            self.saveSessionIfNeeded()
         }
     }
-
 
     func recomputeFromThresholds() async {
-        guard recomputeMasks, let sessionID else { return }
+        guard recomputeMasks, !session.flows.isEmpty else { return }
         await runTask(message: "Recomputing masks…") {
-            let result = try await self.engine.recomputeMasks(sessionID: sessionID, params: self.segmentationParams)
-            self.applyResult(result)
+            let result = try await self.ml.recompute(flows: self.session.flows, params: self.segmentationParams)
+            if let updated = result.masks {
+                self.applyMaskUpdate(updated)
+            }
             self.statusMessage = "Recomputed \(result.ncells) cells"
-        }
-    }
-
-    func applyPreprocessing() async {
-        guard let sessionID else { return }
-        await runTask(message: "Applying filter…") {
-            let result = try await self.engine.preprocess(sessionID: sessionID, params: self.preprocessingParams)
-            self.applyResult(result)
-            self.hasRestoredView = true
-            self.statusMessage = "Preprocessing applied"
-        }
-    }
-
-    func clearRestore() {
-        hasRestoredView = false
-        if viewMode == .restored {
-            viewMode = .image
+            self.saveSessionIfNeeded()
         }
     }
 
     func computeSaturation() async {
         guard imageLoaded else { return }
-        statusMessage = "Auto saturation not yet implemented"
+        updateSaturationFromImage()
+        statusMessage = "Saturation \(Int(displayParams.grayLow))-\(Int(displayParams.grayHigh))"
+    }
+
+    private func updateSaturationFromImage() {
+        guard let image else { return }
+        let pixels = image.pixels
+        guard !pixels.isEmpty else { return }
+        let samples = stride(from: 0, to: pixels.count, by: max(image.channels, 1)).map { Double(pixels[$0]) }
+        let sorted = samples.sorted()
+        let lowIndex = Int((segmentationParams.percentileLow / 100.0) * Double(sorted.count - 1))
+        let highIndex = Int((segmentationParams.percentileHigh / 100.0) * Double(sorted.count - 1))
+        displayParams.grayLow = sorted[max(0, lowIndex)]
+        displayParams.grayHigh = sorted[min(sorted.count - 1, highIndex)]
     }
 
     func saveSeg() async {
-        guard let sessionID else { return }
+        guard session.imagePath != nil, session.masks != nil else { return }
         await runTask(message: "Saving…") {
-            let path = try await self.engine.saveSeg(sessionID: sessionID, path: nil)
-            self.statusMessage = "Saved \(URL(fileURLWithPath: path).lastPathComponent)"
+            let savePath = self.sessionStore.defaultPath(imagePath: self.session.imagePath!)
+            try self.sessionStore.save(path: savePath, session: self.session)
+            self.statusMessage = "Saved \(URL(fileURLWithPath: savePath).lastPathComponent)"
         }
     }
 
     func exportMasks() async {
-        await exportWithPanel(defaultName: "_cp_masks.png", types: [.png, .tiff]) { [self] sessionID, path in
+        await exportWithPanel(defaultName: "_cp_masks.png", types: [.png, .tiff]) { path in
+            guard let masks = self.session.masks else {
+                throw SidecarError.serverError("No masks to export")
+            }
             let format = path.lowercased().contains("tif") ? "tif" : "png"
-            return try await self.engine.exportMasks(sessionID: sessionID, path: path, format: format)
+            try self.exportService.exportMasks(masks: masks, path: path, format: format)
+            return path
         }
     }
 
@@ -327,20 +405,29 @@ final class MainViewModel {
     }
 
     func exportOutlines() async {
-        await exportWithPanel(defaultName: "_outline.txt", types: [.plainText]) { [self] sessionID, path in
-            try await self.engine.exportOutlines(sessionID: sessionID, path: path)
+        await exportWithPanel(defaultName: "_outline.txt", types: [.plainText]) { path in
+            guard let masks = self.session.masks else {
+                throw SidecarError.serverError("No masks to export")
+            }
+            try self.exportService.exportOutlines(masks: masks, path: path)
+            return path
         }
     }
 
     func exportFlows() async {
-        await exportWithPanel(defaultName: "_flows.tif", types: [.tiff]) { [self] sessionID, path in
-            try await self.engine.exportFlows(sessionID: sessionID, path: path)
+        await exportWithPanel(defaultName: "_flows.tif", types: [.tiff]) { path in
+            try self.exportService.exportFlows(flows: self.session.flows, pathBase: path)
+            return path
         }
     }
 
     func exportROIs() async {
-        await exportWithPanel(defaultName: "_rois.zip", types: [.zip]) { [self] sessionID, path in
-            try await self.engine.exportROIs(sessionID: sessionID, path: path)
+        await exportWithPanel(defaultName: "_rois.zip", types: [.zip]) { path in
+            guard let masks = self.session.masks else {
+                throw SidecarError.serverError("No masks to export")
+            }
+            try self.exportService.exportROIs(masks: masks, path: path)
+            return path
         }
     }
 
@@ -356,7 +443,7 @@ final class MainViewModel {
         guard isCustomModel else { return }
         let name = selectedModel
         await runTask(message: "Removing model…") {
-            try await self.engine.removeModel(name: name)
+            try await self.ml.removeModel(name: name)
             await self.refreshModels()
             self.selectedModelIndex = 0
             self.statusMessage = "Removed model \(name)"
@@ -366,15 +453,15 @@ final class MainViewModel {
     private func exportWithPanel(
         defaultName: String,
         types: [UTType],
-        export: @escaping (String, String) async throws -> String
+        export: @escaping (String) throws -> String
     ) async {
-        guard let sessionID, let filename else { return }
+        guard let filename else { return }
         let panel = NSSavePanel()
         panel.nameFieldStringValue = URL(fileURLWithPath: filename).deletingPathExtension().lastPathComponent + defaultName
         panel.allowedContentTypes = types
         guard panel.runModal() == .OK, let url = panel.url else { return }
         await runTask(message: "Exporting…") {
-            let path = try await export(sessionID, url.path)
+            let path = try export(url.path)
             self.statusMessage = "Exported \(URL(fileURLWithPath: path).lastPathComponent)"
         }
     }
@@ -399,22 +486,21 @@ final class MainViewModel {
     }
 
     func removeCells(indices: [Int]) async {
-        guard let sessionID else { return }
+        guard let currentMasks = session.masks else { return }
         await runTask(message: "Removing cells…") {
-            let result = try await self.engine.removeCells(sessionID: sessionID, indices: indices)
-            self.applyResult(result)
+            let updated = MaskEditService.removeCells(masks: currentMasks, indices: indices)
+            self.applyMaskUpdate(updated)
             self.selectedCell = 0
-            if self.autosave && !self.disableAutosave {
-                _ = try await self.engine.saveSeg(sessionID: result.sessionID, path: nil)
-            }
+            self.saveSessionIfNeeded()
         }
     }
 
     func mergeCells(source: Int, target: Int) async {
-        guard let sessionID else { return }
+        guard let currentMasks = session.masks else { return }
         await runTask(message: "Merging cells…") {
-            let result = try await self.engine.mergeCells(sessionID: sessionID, source: source, target: target)
-            self.applyResult(result)
+            let updated = MaskEditService.mergeCells(masks: currentMasks, source: source, target: target)
+            self.applyMaskUpdate(updated)
+            self.saveSessionIfNeeded()
         }
     }
 
@@ -433,19 +519,21 @@ final class MainViewModel {
     }
 
     func finishDrawing() async {
-        guard let sessionID, !pendingStrokes.isEmpty else { return }
+        guard !pendingStrokes.isEmpty, let image else { return }
         let strokes = pendingStrokes
         pendingStrokes = []
         await runTask(message: "Adding cell…") {
-            let result = try await self.engine.addMask(
-                sessionID: sessionID,
+            guard let updated = MaskEditService.addMaskFromStrokes(
+                masks: self.session.masks,
+                imageWidth: image.width,
+                imageHeight: image.height,
                 strokes: strokes,
                 classID: self.defaultClassID
-            )
-            self.applyResult(result)
-            if self.autosave && !self.disableAutosave {
-                _ = try await self.engine.saveSeg(sessionID: result.sessionID, path: nil)
+            ) else {
+                throw SidecarError.serverError("Could not add mask from stroke")
             }
+            self.applyMaskUpdate(updated)
+            self.saveSessionIfNeeded()
         }
     }
 
@@ -459,7 +547,7 @@ final class MainViewModel {
     func trainModel() async {
         await runTask(message: "Training model…", showProgress: true) {
             self.progress = 0.2
-            let result = try await self.engine.train(params: self.trainingParams)
+            let result = try await self.ml.train(params: self.trainingParams)
             self.progress = 1
             self.statusMessage = "Trained model \(result.modelName)"
             await self.refreshModels()
@@ -467,9 +555,9 @@ final class MainViewModel {
     }
 
     func addCustomModel() async {
-        guard let url = pickFile(allowedTypes: ["pth", "pt", "torch"]) else { return }
+        guard let url = pickFile(allowedTypes: ["pth", "pt"]) else { return }
         await runTask(message: "Adding model…") {
-            let name = try await self.engine.addModel(path: url.path)
+            let name = try await self.ml.addModel(path: url.path)
             await self.refreshModels()
             if let index = self.models.firstIndex(of: name) {
                 self.selectedModelIndex = index
@@ -480,7 +568,7 @@ final class MainViewModel {
 
     func handleDroppedURLs(_ urls: [URL]) async {
         guard let url = urls.first else { return }
-        if url.pathExtension.lowercased() == "npy", url.lastPathComponent.contains("_seg") {
+        if url.pathExtension.lowercased() == "cellpose" {
             await loadSeg(path: url.path)
         } else {
             await loadImage(path: url.path)
@@ -496,9 +584,7 @@ final class MainViewModel {
         statusMessage = message
         errorMessage = nil
         if showProgress { progress = 0 }
-        defer {
-            isBusy = false
-        }
+        defer { isBusy = false }
         do {
             try await operation()
         } catch {

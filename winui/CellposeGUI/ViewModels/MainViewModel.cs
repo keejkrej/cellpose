@@ -10,14 +10,18 @@ namespace CellposeGUI.ViewModels;
 
 public sealed class MainViewModel : ObservableObject
 {
-    private readonly ISegmentationEngine _engine;
+    private readonly IMlInferenceEngine _ml;
+    private readonly ImageLoaderService _imageLoader;
+    private readonly CellposeSessionStore _sessionStore;
+    private readonly SeriesDiscoveryService _seriesDiscovery;
+    private readonly ExportService _exportService;
+    private readonly SessionState _session = new();
     private readonly DispatcherQueue _dispatcher;
     private bool _seriesNavigationLocked;
     private SeriesDatasetPayload? _seriesDataset;
     private readonly List<double[]> _currentStroke = [];
     private readonly List<double[][]> _pendingStrokes = [];
 
-    private string? _sessionId;
     private string? _filename;
     private ImageData? _image;
     private MaskData? _masks;
@@ -28,9 +32,7 @@ public sealed class MainViewModel : ObservableObject
     private bool _autosave = true;
     private bool _autoloadMasks;
     private bool _disableAutosave;
-    private bool _saveRestoredImage = true;
     private bool _imageLoaded;
-    private bool _hasRestoredView;
     private bool _isBusy;
     private double _progress;
     private string _statusMessage = "Ready";
@@ -42,13 +44,22 @@ public sealed class MainViewModel : ObservableObject
     private int _defaultClassId;
     private List<string> _models = ["CPSAM"];
 
-    public MainViewModel(ISegmentationEngine engine, DispatcherQueue dispatcher)
+    public MainViewModel(
+        IMlInferenceEngine ml,
+        ImageLoaderService imageLoader,
+        CellposeSessionStore sessionStore,
+        SeriesDiscoveryService seriesDiscovery,
+        ExportService exportService,
+        DispatcherQueue dispatcher)
     {
-        _engine = engine;
+        _ml = ml;
+        _imageLoader = imageLoader;
+        _sessionStore = sessionStore;
+        _seriesDiscovery = seriesDiscovery;
+        _exportService = exportService;
         _dispatcher = dispatcher;
         BindDispatcher(dispatcher);
         SegmentationParams = new SegmentationParameters();
-        PreprocessingParams = new PreprocessingParameters();
         DisplayParams = new DisplayParameters();
         DisplayParams.BindDispatcher(dispatcher);
         DisplayParams.PropertyChanged += (_, e) =>
@@ -63,11 +74,6 @@ public sealed class MainViewModel : ObservableObject
         InstanceClasses = new InstanceClasses();
     }
 
-    public string? SessionId
-    {
-        get => _sessionId;
-        private set => SetProperty(ref _sessionId, value);
-    }
 
     public string? Filename
     {
@@ -138,12 +144,6 @@ public sealed class MainViewModel : ObservableObject
         set => SetProperty(ref _disableAutosave, value);
     }
 
-    public bool SaveRestoredImage
-    {
-        get => _saveRestoredImage;
-        set => SetProperty(ref _saveRestoredImage, value);
-    }
-
     public bool ImageLoaded
     {
         get => _imageLoaded;
@@ -153,12 +153,6 @@ public sealed class MainViewModel : ObservableObject
             Notify(nameof(CanRunSegmentation));
             Notify(nameof(CanSaveMasks));
         }
-    }
-
-    public bool HasRestoredView
-    {
-        get => _hasRestoredView;
-        set => SetProperty(ref _hasRestoredView, value);
     }
 
     public bool IsBusy
@@ -196,7 +190,6 @@ public sealed class MainViewModel : ObservableObject
     }
 
     public SegmentationParameters SegmentationParams { get; }
-    public PreprocessingParameters PreprocessingParams { get; }
     public DisplayParameters DisplayParams { get; }
     public TrainingParameters TrainingParams { get; }
     public SeriesState SeriesState { get; }
@@ -279,25 +272,124 @@ public sealed class MainViewModel : ObservableObject
         }
     }
 
-    public void ApplyResult(SegmentationResult result)
+    public void ApplyLoadedImage(string path, ImageData image)
     {
         if (!_dispatcher.HasThreadAccess)
         {
-            RunOnUi(() => ApplyResult(result));
+            RunOnUi(() => ApplyLoadedImage(path, image));
             return;
         }
 
-        SessionId = result.SessionID;
-        Filename = result.Filename;
-        Image = result.Image;
-        Masks = result.Masks;
-        Ncells = result.Ncells;
-        RecomputeMasks = result.RecomputeMasks;
-        InstanceClasses.Replace(result.Ncells);
+        _session.ImagePath = path;
+        _session.Image = image;
+        _session.Masks = null;
+        _session.Flows = [];
+        _session.RecomputeMasks = false;
+        _session.SeriesDataset = _seriesDataset;
+
+        Filename = path;
+        Image = image;
+        Masks = null;
+        Ncells = 0;
+        RecomputeMasks = false;
+        SelectedCell = 0;
+        InstanceClasses.Replace(0);
         Progress = 1;
         ImageLoaded = true;
         UpdateSaturationFromImage();
         Notify(nameof(CanvasRevision));
+    }
+
+    public void ApplyLoadedSession(LoadedSession loaded)
+    {
+        if (!_dispatcher.HasThreadAccess)
+        {
+            RunOnUi(() => ApplyLoadedSession(loaded));
+            return;
+        }
+
+        _session.ImagePath = loaded.ImagePath;
+        _session.Image = loaded.Image;
+        _session.Masks = loaded.Masks;
+        _session.Flows = loaded.Flows;
+        _session.RecomputeMasks = loaded.RecomputeMasks;
+        _session.Model = loaded.Model;
+        _session.Segmentation = loaded.Segmentation;
+        SegmentationParams.Diameter = loaded.Segmentation.Diameter;
+        SegmentationParams.FlowThreshold = loaded.Segmentation.FlowThreshold;
+        SegmentationParams.CellprobThreshold = loaded.Segmentation.CellprobThreshold;
+        SegmentationParams.Niter = loaded.Segmentation.Niter;
+        SegmentationParams.MinSize = loaded.Segmentation.MinSize;
+
+        Filename = loaded.ImagePath;
+        Image = loaded.Image;
+        Masks = loaded.Masks;
+        Ncells = loaded.Masks.Labels.Length == 0 ? 0 : loaded.Masks.Labels.Max();
+        RecomputeMasks = loaded.RecomputeMasks;
+        InstanceClasses.Replace(Ncells);
+        SelectedCell = 0;
+        Progress = 1;
+        ImageLoaded = true;
+        UpdateSaturationFromImage();
+        Notify(nameof(CanvasRevision));
+    }
+
+    public void ApplyMaskUpdate(MaskData masks)
+    {
+        if (!_dispatcher.HasThreadAccess)
+        {
+            RunOnUi(() => ApplyMaskUpdate(masks));
+            return;
+        }
+
+        _session.Masks = masks;
+        Masks = masks;
+        Ncells = masks.Labels.Length == 0 ? 0 : masks.Labels.Max();
+        InstanceClasses.Replace(Ncells);
+        NotifyCanvasChanged();
+    }
+
+    public void ApplyInferenceResult(InferResult result)
+    {
+        if (!_dispatcher.HasThreadAccess)
+        {
+            RunOnUi(() => ApplyInferenceResult(result));
+            return;
+        }
+
+        _session.Flows = result.Flows;
+        _session.RecomputeMasks = result.RecomputeMasks;
+        _session.Model = SelectedModel;
+        _session.Segmentation = CloneSegmentationParams();
+        RecomputeMasks = result.RecomputeMasks;
+        if (result.Masks != null)
+            ApplyMaskUpdate(result.Masks);
+    }
+
+    private SegmentationParameters CloneSegmentationParams() => new()
+    {
+        Diameter = SegmentationParams.Diameter,
+        FlowThreshold = SegmentationParams.FlowThreshold,
+        CellprobThreshold = SegmentationParams.CellprobThreshold,
+        PercentileLow = SegmentationParams.PercentileLow,
+        PercentileHigh = SegmentationParams.PercentileHigh,
+        Niter = SegmentationParams.Niter,
+        MinSize = SegmentationParams.MinSize,
+        StitchThreshold = SegmentationParams.StitchThreshold,
+        Anisotropy = SegmentationParams.Anisotropy,
+        Flow3DSmooth = SegmentationParams.Flow3DSmooth,
+        Do3D = SegmentationParams.Do3D,
+    };
+
+    private void SaveSessionIfNeeded()
+    {
+        if (!_autosave || _disableAutosave || _session.ImagePath == null || _session.Masks == null)
+            return;
+
+        _session.Segmentation = CloneSegmentationParams();
+        _session.Model = SelectedModel;
+        var path = _sessionStore.DefaultPath(_session.ImagePath);
+        _sessionStore.Save(path, _session);
     }
 
     private void SetStatus(string message)
@@ -316,7 +408,7 @@ public sealed class MainViewModel : ObservableObject
     {
         try
         {
-            var listed = await _engine.ListModelsAsync();
+            var listed = await _ml.ListModelsAsync();
             var custom = listed.Custom.Where(m => !m.Equals("cpsam", StringComparison.OrdinalIgnoreCase)).ToList();
             Models = ["CPSAM", .. custom];
         }
@@ -329,7 +421,7 @@ public sealed class MainViewModel : ObservableObject
     public async Task LoadImagePanelAsync()
     {
         var path = await PickFileAsync([
-            ".tif", ".tiff", ".png", ".jpg", ".jpeg", ".gif", ".npy",
+            ".tif", ".tiff", ".png", ".jpg", ".jpeg", ".gif",
         ]);
         if (path != null)
             await LoadImageAsync(path);
@@ -338,14 +430,14 @@ public sealed class MainViewModel : ObservableObject
     public async Task LoadImageAsync(string path) =>
         await RunTaskAsync("Loading image…", async () =>
         {
-            var result = await _engine.LoadImageAsync(path, load3D: false);
-            ApplyResult(result);
+            var image = await Task.Run(() => _imageLoader.Load(path));
+            ApplyLoadedImage(path, image);
             StatusMessage = $"Loaded {Path.GetFileName(path)}";
         });
 
     public async Task LoadSegPanelAsync()
     {
-        var path = await PickFileAsync([".npy"]);
+        var path = await PickFileAsync([".cellpose"]);
         if (path != null)
             await LoadSegAsync(path);
     }
@@ -353,8 +445,8 @@ public sealed class MainViewModel : ObservableObject
     public async Task LoadSegAsync(string path) =>
         await RunTaskAsync("Loading segmentation…", async () =>
         {
-            var result = await _engine.LoadSegAsync(path, load3D: false);
-            ApplyResult(result);
+            var loaded = await Task.Run(() => _sessionStore.Load(path, _imageLoader));
+            ApplyLoadedSession(loaded);
             StatusMessage = $"Loaded {Path.GetFileName(path)}";
         });
 
@@ -368,10 +460,8 @@ public sealed class MainViewModel : ObservableObject
 
         await RunTaskAsync("Discovering series…", async () =>
         {
-            var discovery = await _engine.DiscoverSeriesAsync(
-                PendingFolderPath,
-                subfolderTemplate,
-                filenameTemplate).ConfigureAwait(false);
+            var discovery = await Task.Run(() =>
+                _seriesDiscovery.Discover(PendingFolderPath, subfolderTemplate, filenameTemplate));
 
             await ApplyOnUiAsync(() =>
             {
@@ -395,13 +485,13 @@ public sealed class MainViewModel : ObservableObject
             var recordIndex = ResolveCurrentSeriesRecordIndex() ?? 0;
             recordIndex = Math.Clamp(recordIndex, 0, discovery.Records.Count - 1);
             var record = discovery.Records[recordIndex];
-            var result = await _engine.LoadImageAsync(record.Path, load3D: false).ConfigureAwait(false);
+            var image = await Task.Run(() => _imageLoader.Load(record.Path));
 
             var loadedIndex = recordIndex;
             await ApplyOnUiAsync(() =>
             {
                 SeriesState.RecordIndex = loadedIndex;
-                ApplyResult(result);
+                ApplyLoadedImage(record.Path, image);
                 SetStatus($"Loaded series with {discovery.RecordCount} records");
             }).ConfigureAwait(false);
         });
@@ -439,16 +529,16 @@ public sealed class MainViewModel : ObservableObject
         PendingFolderPath = folder;
     }
 
-    public async Task<(string Subfolder, string Filename)> FetchSeriesTemplateSuggestionsAsync(string folder)
+    public Task<(string Subfolder, string Filename)> FetchSeriesTemplateSuggestionsAsync(string folder)
     {
         try
         {
-            var suggestion = await _engine.SuggestSeriesTemplatesAsync(folder);
-            return (suggestion.SubfolderTemplate, suggestion.FilenameTemplate);
+            var suggestion = _seriesDiscovery.SuggestTemplates(folder);
+            return Task.FromResult((suggestion.SubfolderTemplate, suggestion.FilenameTemplate));
         }
         catch
         {
-            return (LastSeriesSubfolderTemplate, LastSeriesFilenameTemplate);
+            return Task.FromResult((LastSeriesSubfolderTemplate, LastSeriesFilenameTemplate));
         }
     }
 
@@ -501,68 +591,45 @@ public sealed class MainViewModel : ObservableObject
 
         await RunTaskAsync("Loading frame…", async () =>
         {
-            var result = await _engine.LoadImageAsync(record.Path, load3D: false);
-            ApplyResult(result);
+            var image = await Task.Run(() => _imageLoader.Load(record.Path));
+            ApplyLoadedImage(record.Path, image);
             StatusMessage = record.Label;
         });
     }
 
     public async Task RunSegmentationAsync()
     {
-        if (_sessionId == null)
+        if (_session.ImagePath == null)
             return;
 
         await RunTaskAsync("Running segmentation…", async () =>
         {
             Progress = 0.1;
-            var result = await _engine.SegmentAsync(
-                _sessionId,
-                imagePayload: null,
-                filename: _filename,
-                modelName: SelectedModel,
-                customModel: IsCustomModel,
-                SegmentationParams,
-                PreprocessingParams);
+            var result = await _ml.InferAsync(
+                _session.ImagePath,
+                SelectedModel,
+                IsCustomModel,
+                SegmentationParams);
             Progress = 1;
-            ApplyResult(result);
+            ApplyInferenceResult(result);
             StatusMessage = $"Found {result.Ncells} cells";
-            if (_autosave && !_disableAutosave)
-                await _engine.SaveSegAsync(result.SessionID, path: null);
+            SaveSessionIfNeeded();
         }, showProgress: true);
     }
 
     public async Task RecomputeFromThresholdsAsync()
     {
-        if (!_recomputeMasks || _sessionId == null)
+        if (!_recomputeMasks || _session.Flows.Count == 0)
             return;
 
         await RunTaskAsync("Recomputing masks…", async () =>
         {
-            var result = await _engine.RecomputeMasksAsync(_sessionId, SegmentationParams);
-            ApplyResult(result);
+            var result = await _ml.RecomputeAsync(_session.Flows, SegmentationParams);
+            if (result.Masks != null)
+                ApplyMaskUpdate(result.Masks);
             StatusMessage = $"Recomputed {result.Ncells} cells";
+            SaveSessionIfNeeded();
         });
-    }
-
-    public async Task ApplyPreprocessingAsync()
-    {
-        if (_sessionId == null)
-            return;
-
-        await RunTaskAsync("Applying filter…", async () =>
-        {
-            var result = await _engine.PreprocessAsync(_sessionId, PreprocessingParams);
-            ApplyResult(result);
-            HasRestoredView = true;
-            StatusMessage = "Preprocessing applied";
-        });
-    }
-
-    public void ClearRestore()
-    {
-        HasRestoredView = false;
-        if (_viewMode == ViewMode.Restored)
-            ViewMode = ViewMode.Image;
     }
 
     public Task ComputeSaturationAsync()
@@ -589,22 +656,30 @@ public sealed class MainViewModel : ObservableObject
 
     public async Task SaveSegAsync()
     {
-        if (_sessionId == null)
+        if (_session.ImagePath == null || _session.Masks == null)
             return;
 
         await RunTaskAsync("Saving…", async () =>
         {
-            var path = await _engine.SaveSegAsync(_sessionId, path: null);
+            var path = await Task.Run(() =>
+            {
+                var savePath = _sessionStore.DefaultPath(_session.ImagePath!);
+                _sessionStore.Save(savePath, _session);
+                return savePath;
+            });
             StatusMessage = $"Saved {Path.GetFileName(path)}";
         });
     }
 
     public async Task ExportMasksAsync()
     {
-        await ExportWithPanelAsync("_cp_masks.png", [".png", ".tif", ".tiff"], async (sessionId, path) =>
+        await ExportWithPanelAsync("_cp_masks.png", [".png", ".tif", ".tiff"], (path) =>
         {
+            if (_session.Masks == null)
+                throw new SidecarException("No masks to export");
             var format = path.Contains("tif", StringComparison.OrdinalIgnoreCase) ? "tif" : "png";
-            return await _engine.ExportMasksAsync(sessionId, path, format);
+            _exportService.ExportMasks(_session.Masks, path, format);
+            return path;
         });
     }
 
@@ -616,16 +691,29 @@ public sealed class MainViewModel : ObservableObject
     }
 
     public async Task ExportOutlinesAsync() =>
-        await ExportWithPanelAsync("_outline.txt", [".txt"], (sessionId, path) =>
-            _engine.ExportOutlinesAsync(sessionId, path));
+        await ExportWithPanelAsync("_outline.txt", [".txt"], path =>
+        {
+            if (_session.Masks == null)
+                throw new SidecarException("No masks to export");
+            _exportService.ExportOutlines(_session.Masks, path);
+            return path;
+        });
 
     public async Task ExportFlowsAsync() =>
-        await ExportWithPanelAsync("_flows.tif", [".tif", ".tiff"], (sessionId, path) =>
-            _engine.ExportFlowsAsync(sessionId, path));
+        await ExportWithPanelAsync("_flows.tif", [".tif", ".tiff"], path =>
+        {
+            _exportService.ExportFlows(_session.Flows, path);
+            return path;
+        });
 
     public async Task ExportROIsAsync() =>
-        await ExportWithPanelAsync("_rois.zip", [".zip"], (sessionId, path) =>
-            _engine.ExportROIsAsync(sessionId, path));
+        await ExportWithPanelAsync("_rois.zip", [".zip"], path =>
+        {
+            if (_session.Masks == null)
+                throw new SidecarException("No masks to export");
+            _exportService.ExportRois(_session.Masks, path);
+            return path;
+        });
 
     public async Task ClearAllMasksAsync()
     {
@@ -645,7 +733,7 @@ public sealed class MainViewModel : ObservableObject
         var name = SelectedModel;
         await RunTaskAsync("Removing model…", async () =>
         {
-            await _engine.RemoveModelAsync(name);
+            await _ml.RemoveModelAsync(name);
             await RefreshModelsAsync();
             SelectedModelIndex = 0;
             StatusMessage = $"Removed model {name}";
@@ -678,30 +766,32 @@ public sealed class MainViewModel : ObservableObject
         SelectedCell = label;
     }
 
-    public async Task RemoveCellsAsync(IReadOnlyList<int> indices)
+    public Task RemoveCellsAsync(IReadOnlyList<int> indices)
     {
-        if (_sessionId == null)
-            return;
+        if (_session.Masks == null)
+            return Task.CompletedTask;
 
-        await RunTaskAsync("Removing cells…", async () =>
+        return RunTaskAsync("Removing cells…", async () =>
         {
-            var result = await _engine.RemoveCellsAsync(_sessionId, indices);
-            ApplyResult(result);
+            await Task.Yield();
+            var updated = MaskEditService.RemoveCells(_session.Masks, indices);
+            ApplyMaskUpdate(updated);
             SelectedCell = 0;
-            if (_autosave && !_disableAutosave)
-                await _engine.SaveSegAsync(result.SessionID, path: null);
+            SaveSessionIfNeeded();
         });
     }
 
-    public async Task MergeCellsAsync(int source, int target)
+    public Task MergeCellsAsync(int source, int target)
     {
-        if (_sessionId == null)
-            return;
+        if (_session.Masks == null)
+            return Task.CompletedTask;
 
-        await RunTaskAsync("Merging cells…", async () =>
+        return RunTaskAsync("Merging cells…", async () =>
         {
-            var result = await _engine.MergeCellsAsync(_sessionId, source, target);
-            ApplyResult(result);
+            await Task.Yield();
+            var updated = MaskEditService.MergeCells(_session.Masks, source, target);
+            ApplyMaskUpdate(updated);
+            SaveSessionIfNeeded();
         });
     }
 
@@ -722,20 +812,27 @@ public sealed class MainViewModel : ObservableObject
         _currentStroke.Clear();
     }
 
-    public async Task FinishDrawingAsync()
+    public Task FinishDrawingAsync()
     {
-        if (_sessionId == null || _pendingStrokes.Count == 0)
-            return;
+        if (_session.Image == null || _pendingStrokes.Count == 0)
+            return Task.CompletedTask;
 
         var strokes = _pendingStrokes.ToArray();
         _pendingStrokes.Clear();
 
-        await RunTaskAsync("Adding cell…", async () =>
+        return RunTaskAsync("Adding cell…", async () =>
         {
-            var result = await _engine.AddMaskAsync(_sessionId, strokes, _defaultClassId);
-            ApplyResult(result);
-            if (_autosave && !_disableAutosave)
-                await _engine.SaveSegAsync(result.SessionID, path: null);
+            await Task.Yield();
+            var updated = MaskEditService.AddMaskFromStrokes(
+                _session.Masks,
+                _session.Image!.Width,
+                _session.Image.Height,
+                strokes,
+                _defaultClassId);
+            if (updated == null)
+                throw new SidecarException("Cell too small to draw");
+            ApplyMaskUpdate(updated);
+            SaveSessionIfNeeded();
         });
     }
 
@@ -753,7 +850,7 @@ public sealed class MainViewModel : ObservableObject
         await RunTaskAsync("Training model…", async () =>
         {
             Progress = 0.2;
-            var result = await _engine.TrainAsync(TrainingParams);
+            var result = await _ml.TrainAsync(TrainingParams);
             Progress = 1;
             StatusMessage = $"Trained model {result.ModelName}";
             await RefreshModelsAsync();
@@ -768,7 +865,7 @@ public sealed class MainViewModel : ObservableObject
 
         await RunTaskAsync("Adding model…", async () =>
         {
-            var name = await _engine.AddModelAsync(path);
+            var name = await _ml.AddModelAsync(path);
             await RefreshModelsAsync();
             var index = _models.IndexOf(name);
             if (index >= 0)
@@ -783,31 +880,30 @@ public sealed class MainViewModel : ObservableObject
         if (path == null)
             return;
 
-        if (Path.GetExtension(path).Equals(".npy", StringComparison.OrdinalIgnoreCase) &&
-            Path.GetFileName(path).Contains("_seg", StringComparison.OrdinalIgnoreCase))
+        if (Path.GetExtension(path).Equals(".cellpose", StringComparison.OrdinalIgnoreCase))
             await LoadSegAsync(path);
         else
             await LoadImageAsync(path);
     }
 
-    private async Task LoadCurrentSeriesRecordAsync()
+    private Task LoadCurrentSeriesRecordAsync()
     {
         if (_seriesNavigationLocked)
-            return;
+            return Task.CompletedTask;
 
         if (ResolveCurrentSeriesRecordIndex() is not int recordIndex ||
             recordIndex == SeriesState.RecordIndex)
-            return;
+            return Task.CompletedTask;
 
         SeriesState.RecordIndex = recordIndex;
         var record = SeriesState.CurrentRecord;
         if (record == null)
-            return;
+            return Task.CompletedTask;
 
-        await RunTaskAsync("Loading frame…", async () =>
+        return RunTaskAsync("Loading frame…", async () =>
         {
-            var result = await _engine.LoadImageAsync(record.Path, load3D: false).ConfigureAwait(false);
-            ApplyResult(result);
+            var image = await Task.Run(() => _imageLoader.Load(record.Path));
+            ApplyLoadedImage(record.Path, image);
             SetStatus(record.Label);
         });
     }
@@ -870,9 +966,9 @@ public sealed class MainViewModel : ObservableObject
     private async Task ExportWithPanelAsync(
         string defaultSuffix,
         IReadOnlyList<string> extensions,
-        Func<string, string, Task<string>> export)
+        Func<string, string> export)
     {
-        if (_sessionId == null || _filename == null)
+        if (_filename == null)
             return;
 
         var defaultName = Path.GetFileNameWithoutExtension(_filename) + defaultSuffix;
@@ -882,7 +978,7 @@ public sealed class MainViewModel : ObservableObject
 
         await RunTaskAsync("Exporting…", async () =>
         {
-            var saved = await export(_sessionId, path);
+            var saved = await Task.Run(() => export(path));
             StatusMessage = $"Exported {Path.GetFileName(saved)}";
         });
     }

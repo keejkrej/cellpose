@@ -1,6 +1,6 @@
+using System.Buffers.Binary;
 using System.IO.Compression;
-using System.Text;
-using System.Text.Json;
+using System.Text.Json.Serialization;
 using CellposeGUI.Models;
 
 namespace CellposeGUI.Services;
@@ -13,34 +13,31 @@ public static class ArrayCodec
         return DecompressZlib(compressed);
     }
 
-    public static ImageData DecodeUInt8Image(ArrayPayload payload)
+    public static ArrayPayload EncodeRaw(byte[] raw, string dtype, int[] shape)
     {
-        var raw = Decode(payload);
-        var shape = payload.Shape;
-        int width, height, channels;
-        if (shape.Length == 3)
+        return new ArrayPayload
         {
-            height = shape[0];
-            width = shape[1];
-            channels = shape[2];
-        }
-        else if (shape.Length == 2)
-        {
-            height = shape[0];
-            width = shape[1];
-            channels = 1;
-        }
-        else
-        {
-            throw new SidecarException("Invalid image shape from sidecar");
-        }
+            Dtype = dtype,
+            Shape = shape,
+            DataB64 = Convert.ToBase64String(CompressZlib(raw)),
+        };
+    }
 
-        return new ImageData
+    public static MaskData? DecodeMasks(ArrayPayload? payload)
+    {
+        if (payload == null || DecodeInt32Labels(payload) is not { } decoded)
+            return null;
+
+        return new MaskData
         {
-            Width = width,
-            Height = height,
-            Channels = channels,
-            Pixels = raw,
+            Width = decoded.Width,
+            Height = decoded.Height,
+            Labels = decoded.Labels,
+            Colors = MaskEditService.DefaultColors(decoded.Labels.Max()),
+            OutlineLabels = MaskEditService.ComputeOutlineLabels(
+                decoded.Labels,
+                decoded.Width,
+                decoded.Height),
         };
     }
 
@@ -67,9 +64,17 @@ public static class ArrayCodec
             throw new SidecarException("Invalid mask shape from sidecar");
         }
 
-        var labels = new int[raw.Length / sizeof(int)];
-        Buffer.BlockCopy(raw, 0, labels, 0, raw.Length);
-        return (labels, width, height);
+        if (payload.Dtype is "uint16" or "uint32")
+        {
+            var labels = new int[raw.Length / sizeof(ushort)];
+            for (var i = 0; i < labels.Length; i++)
+                labels[i] = BinaryPrimitives.ReadUInt16LittleEndian(raw.AsSpan(i * sizeof(ushort)));
+            return (labels, width, height);
+        }
+
+        var intLabels = new int[raw.Length / sizeof(int)];
+        Buffer.BlockCopy(raw, 0, intLabels, 0, raw.Length);
+        return (intLabels, width, height);
     }
 
     public static byte[][] DecodeColors(ArrayPayload? payload)
@@ -91,34 +96,32 @@ public static class ArrayCodec
         return colors;
     }
 
-    public static SegmentationResult ToSegmentationResult(SidecarSessionResponse response)
+    public static InferResult ToInferResult(InferResponsePayload response)
     {
-        var image = DecodeUInt8Image(response.DisplayImage);
-        MaskData? maskData = null;
-        if (response.Masks != null &&
-            DecodeInt32Labels(response.Masks) is { } maskDecoded)
+        return new InferResult
         {
-            var colors = DecodeColors(response.Colors);
-            var outlines = DecodeInt32Labels(response.Outlines)?.Labels;
-            maskData = new MaskData
-            {
-                Width = maskDecoded.Width,
-                Height = maskDecoded.Height,
-                Labels = maskDecoded.Labels,
-                Colors = colors,
-                OutlineLabels = outlines,
-            };
-        }
-
-        return new SegmentationResult
-        {
-            SessionID = response.SessionID,
-            Image = image,
-            Masks = maskData,
+            Masks = DecodeMasks(response.Masks),
+            Flows = response.Flows,
             Ncells = response.Ncells,
             RecomputeMasks = response.RecomputeMasks,
-            Filename = response.Filename,
         };
+    }
+
+    public static RecomputeResult ToRecomputeResult(RecomputeResponsePayload response)
+    {
+        return new RecomputeResult
+        {
+            Masks = DecodeMasks(response.Masks),
+            Ncells = response.Ncells,
+        };
+    }
+
+    private static byte[] CompressZlib(byte[] data)
+    {
+        using var output = new MemoryStream();
+        using (var zlib = new ZLibStream(output, CompressionLevel.Optimal))
+            zlib.Write(data);
+        return output.ToArray();
     }
 
     private static byte[] DecompressZlib(byte[] data)
@@ -131,48 +134,17 @@ public static class ArrayCodec
     }
 }
 
-public sealed class SidecarClient
+public sealed class InferResponsePayload
 {
-    private static readonly JsonSerializerOptions JsonOptions = new()
-    {
-        PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
-        PropertyNameCaseInsensitive = true,
-    };
+    public ArrayPayload? Masks { get; set; }
+    public List<ArrayPayload> Flows { get; set; } = [];
+    public int Ncells { get; set; }
+    [JsonPropertyName("recompute_masks")]
+    public bool RecomputeMasks { get; set; }
+}
 
-    private readonly HttpClient _http;
-    private readonly Uri _baseUri;
-
-    public SidecarClient(Uri baseUri)
-    {
-        _baseUri = baseUri;
-        _http = new HttpClient
-        {
-            Timeout = TimeSpan.FromHours(1),
-        };
-    }
-
-    public async Task<T> GetAsync<T>(string path, CancellationToken cancellationToken = default)
-    {
-        var response = await _http.GetAsync(new Uri(_baseUri, path.TrimStart('/')), cancellationToken);
-        return await ReadResponseAsync<T>(response, cancellationToken);
-    }
-
-    public async Task<T> PostAsync<T>(string path, object body, CancellationToken cancellationToken = default)
-    {
-        var json = JsonSerializer.Serialize(body, JsonOptions);
-        using var content = new StringContent(json, Encoding.UTF8, "application/json");
-        var response = await _http.PostAsync(new Uri(_baseUri, path.TrimStart('/')), content, cancellationToken);
-        return await ReadResponseAsync<T>(response, cancellationToken);
-    }
-
-    private static async Task<T> ReadResponseAsync<T>(HttpResponseMessage response, CancellationToken cancellationToken)
-    {
-        var data = await response.Content.ReadAsStringAsync(cancellationToken);
-        if (response.IsSuccessStatusCode)
-            return JsonSerializer.Deserialize<T>(data, JsonOptions)
-                   ?? throw new SidecarException("Invalid response from sidecar");
-
-        var detail = JsonSerializer.Deserialize<SidecarErrorResponse>(data, JsonOptions)?.Detail;
-        throw new SidecarException(detail ?? data);
-    }
+public sealed class RecomputeResponsePayload
+{
+    public ArrayPayload? Masks { get; set; }
+    public int Ncells { get; set; }
 }

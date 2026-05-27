@@ -31,9 +31,12 @@ def train(request: TrainRequest) -> dict:
             if name.lower().endswith((".tif", ".tiff", ".png", ".jpg", ".jpeg", ".npy"))
         ]
     )
-    train_data, train_labels, train_files = gui_io._get_train_set(image_names)
+    train_data, train_labels, train_files, _, _ = gui_io._get_train_set(image_names)
     if len(train_data) == 0:
-        raise HTTPException(status_code=400, detail="No training data with _seg.npy labels found")
+        raise HTTPException(
+            status_code=400,
+            detail="No training data with *_seg.cellpose labels found",
+        )
 
     save_folder = request.model_save_folder or str(MODEL_DIR / "custom")
     os.makedirs(save_folder, exist_ok=True)

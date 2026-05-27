@@ -1,6 +1,6 @@
 # Cellpose SwiftUI GUI (macOS)
 
-Native macOS SwiftUI front-end for Cellpose, backed by a local Python sidecar that runs the existing PyTorch segmentation stack.
+Native macOS SwiftUI front-end for Cellpose. Image I/O, mask editing, series navigation, export, and `*_seg.cellpose` session files are handled locally in Swift. ML inference, recompute, training, and model management go through a local Python sidecar.
 
 ## Requirements
 
@@ -38,20 +38,30 @@ Set environment variables in the Xcode scheme if needed:
 
 ## Architecture
 
+```
+SwiftUI app (local):  image load, masks, export, series, .cellpose I/O
+        ↓ HTTP (ML only)
+Python sidecar:       /infer, /recompute, /train, /models
+```
+
 - **SwiftUI app** (`macos/CellposeGUI/`): 3-column layout, image canvas, menus, editing
-- **SegmentationEngine protocol**: abstraction for future Core ML backend
-- **SidecarSegmentationEngine**: HTTP client to Python sidecar
-- **Python sidecar** (`cellpose/gui/sidecar/`): FastAPI server wrapping `CellposeModel.eval`, I/O, mask editing, training
+- **Local services**: `ImageLoaderService`, `CellposeSessionStore`, `MaskEditService`, `SeriesDiscoveryService`, `ExportService`
+- **MlInferenceEngine protocol**: narrow ML abstraction (`SidecarMlEngine` today)
+- **Python sidecar** (`cellpose/gui/sidecar/`): stateless FastAPI server for inference, recompute, training
+
+## Session format
+
+Segmentation state is saved as `{stem}_seg.cellpose` — a ZIP archive containing `manifest.json` and raw binary arrays under `arrays/` (masks, flows, colors). This matches the WinUI app and Python `cellpose/gui/session_format/` package.
 
 ## Features
 
-- Load images (TIFF, PNG, JPG) and `_seg.npy` state files
+- Load images (TIFF, PNG, JPG) and `*_seg.cellpose` session files
 - Run CPSAM / custom model segmentation
 - Mask overlay with select (click), remove (⌃+click), merge (⌥+click)
 - Shift+drag drawing with Enter/Commit to add cells
-- Save `_seg.npy`, export masks PNG/TIF
+- Save `*_seg.cellpose`, export masks PNG/TIF, outlines, flows, ImageJ ROIs
 - Folder series discovery and navigation
-- Preprocessing panel and live mask recompute from cached flows
+- Live mask recompute from cached flows (threshold sliders)
 - Train new model dialog and custom model management
 - Drag-and-drop file loading
 
@@ -61,14 +71,10 @@ Set environment variables in the Xcode scheme if needed:
 |----------|-------------|
 | `GET /health` | Health check |
 | `GET /models` | List models |
-| `POST /segment` | Run segmentation |
-| `POST /recompute-masks` | Update masks from cached flows |
-| `POST /io/load-image` | Load image file |
-| `POST /io/load-seg` | Load `_seg.npy` |
-| `POST /io/save-seg` | Save `_seg.npy` |
-| `POST /masks/remove` | Remove cells |
-| `POST /masks/add` | Add drawn cell |
-| `POST /series/discover` | Discover folder series |
+| `POST /infer` | Run segmentation on image path |
+| `POST /recompute` | Update masks from cached flows |
 | `POST /train` | Train custom model |
+| `POST /models/add` | Register custom model |
+| `POST /models/remove` | Remove custom model |
 
 Sidecar binds to `127.0.0.1` only.

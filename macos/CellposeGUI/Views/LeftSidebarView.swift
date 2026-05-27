@@ -31,10 +31,9 @@ struct LeftSidebarView: View {
                     Picker("View", selection: $viewModel.viewMode) {
                         ForEach(ViewMode.allCases) { mode in
                             Text(mode.title).tag(mode)
-                                .disabled(mode == .restored && !viewModel.hasRestoredView)
+                                .disabled(mode != .image)
                         }
                     }
-                    Toggle("norm3D", isOn: $viewModel.preprocessingParams.norm3D)
                     Button("auto saturation") {
                         Task { await viewModel.computeSaturation() }
                     }
@@ -49,36 +48,6 @@ struct LeftSidebarView: View {
                         value: $viewModel.displayParams.grayHigh,
                         isEnabled: viewModel.imageLoaded
                     )
-                }
-
-                SidebarPanel(title: "Preprocessing") {
-                    LabeledContent("sharpen radius") {
-                        TextField("0", value: $viewModel.preprocessingParams.sharpenRadius, format: .number)
-                            .frame(width: 60)
-                    }
-                    LabeledContent("smooth radius") {
-                        TextField("0", value: $viewModel.preprocessingParams.smoothRadius, format: .number)
-                            .frame(width: 60)
-                    }
-                    LabeledContent("tile norm blocksize") {
-                        TextField("0", value: $viewModel.preprocessingParams.tileNormBlocksize, format: .number)
-                            .frame(width: 60)
-                    }
-                    LabeledContent("tile norm smooth3D") {
-                        TextField("0", value: $viewModel.preprocessingParams.tileNormSmooth3D, format: .number)
-                            .frame(width: 60)
-                    }
-                    Toggle("save restored/filtered image", isOn: $viewModel.saveRestoredImage)
-                    HStack {
-                        Button("reset") {
-                            viewModel.clearRestore()
-                        }
-                        .disabled(!viewModel.imageLoaded)
-                        Button("apply") {
-                            Task { await viewModel.applyPreprocessing() }
-                        }
-                        .disabled(!viewModel.imageLoaded || viewModel.isBusy)
-                    }
                 }
             }
             .padding(.vertical, 8)
@@ -112,7 +81,6 @@ private struct SeriesAxisRow: View {
         max(values.count - 1, 0)
     }
 
-    /// SwiftUI needs a non-empty range when disabled; Qt uses 0...0.
     private var sliderUpperBound: Double {
         Double(max(maxIndex, 1))
     }

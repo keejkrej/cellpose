@@ -100,35 +100,37 @@ def _remove_model(parent, ind=None, verbose=True):
 
 
 def _get_train_set(image_names):
-    """ get training data and labels for images in current folder image_names"""
+    """Get training data and labels for images in current folder image_names."""
+    from cellpose.gui.session_format import read_session
+    from cellpose.io import imread
+
     train_data, train_labels, train_files = [], [], []
-    restore = None
-    normalize_params = normalize_default
     for image_name_full in image_names:
         image_name = os.path.splitext(image_name_full)[0]
-        label_name = None
-        if os.path.exists(image_name + "_seg.npy"):
-            dat = np.load(image_name + "_seg.npy", allow_pickle=True).item()
-            masks = dat["masks"].squeeze()
-            if masks.ndim == 2:
-                fastremap.renumber(masks, in_place=True)
-                label_name = image_name + "_seg.npy"
-            else:
-                print(f"GUI_INFO: _seg.npy found for {image_name} but masks.ndim!=2")
-            if "img_restore" in dat:
-                data = dat["img_restore"].squeeze()
-                restore = dat["restore"]
-            else:
-                data = imread(image_name_full)
-            normalize_params = dat[
-                "normalize_params"] if "normalize_params" in dat else normalize_default
-        if label_name is not None:
-            train_files.append(image_name_full)
-            train_data.append(data)
-            train_labels.append(masks)
-    if restore:
-        print(f"GUI_INFO: using {restore} images (dat['img_restore'])")
-    return train_data, train_labels, train_files, restore, normalize_params
+        session_path = image_name + "_seg.cellpose"
+        if not os.path.isfile(session_path):
+            continue
+        try:
+            session = read_session(session_path)
+        except Exception as exc:
+            print(f"GUI_INFO: failed to read {session_path}: {exc}")
+            continue
+        masks = np.asarray(session.masks).squeeze()
+        if masks.ndim != 2:
+            print(f"GUI_INFO: {session_path} masks.ndim!=2")
+            continue
+        fastremap.renumber(masks, in_place=True)
+        if os.path.isfile(session.source_image):
+            data = imread(session.source_image)
+        elif os.path.isfile(image_name_full):
+            data = imread(image_name_full)
+        else:
+            print(f"GUI_INFO: no image found for {session_path}")
+            continue
+        train_files.append(image_name_full)
+        train_data.append(data)
+        train_labels.append(masks)
+    return train_data, train_labels, train_files, None, normalize_default
 
 
 def _clear_series_state(parent):

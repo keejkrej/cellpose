@@ -17,7 +17,6 @@
             <Expander Header="Views" IsExpanded="True" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
                 <StackPanel Spacing="8" HorizontalAlignment="Stretch">
                     <ComboBox x:Name="ViewModeCombo" Header="View" HorizontalAlignment="Stretch" />
-                    <ToggleSwitch x:Name="Norm3DToggle" Header="norm3D" />
                     <Button x:Name="AutoSaturationButton" Content="auto saturation" HorizontalAlignment="Left" />
                     <Grid HorizontalAlignment="Stretch">
                         <Grid.ColumnDefinitions>
@@ -39,20 +38,6 @@
                         <Slider x:Name="GrayHighSlider" Grid.Column="1" Minimum="0" Maximum="255" StepFrequency="1" Value="255" HorizontalAlignment="Stretch" />
                         <TextBlock x:Name="GrayHighValueText" Grid.Column="2" Margin="6,0,0,0" VerticalAlignment="Center" Text="255" />
                     </Grid>
-                </StackPanel>
-            </Expander>
-
-            <Expander Header="Preprocessing" IsExpanded="True" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
-                <StackPanel Spacing="8" HorizontalAlignment="Stretch">
-                    <NumberBox x:Name="SharpenRadiusBox" Header="sharpen radius" HorizontalAlignment="Stretch" SpinButtonPlacementMode="Inline" />
-                    <NumberBox x:Name="SmoothRadiusBox" Header="smooth radius" HorizontalAlignment="Stretch" SpinButtonPlacementMode="Inline" />
-                    <NumberBox x:Name="TileNormBlocksizeBox" Header="tile norm blocksize" HorizontalAlignment="Stretch" SpinButtonPlacementMode="Inline" />
-                    <NumberBox x:Name="TileNormSmooth3DBox" Header="tile norm smooth3D" HorizontalAlignment="Stretch" SpinButtonPlacementMode="Inline" />
-                    <ToggleSwitch x:Name="SaveRestoredToggle" Header="save restored/filtered image" />
-                    <StackPanel Orientation="Horizontal" Spacing="8">
-                        <Button x:Name="ResetPreprocessButton" Content="reset" />
-                        <Button x:Name="ApplyPreprocessButton" Content="apply" />
-                    </StackPanel>
                 </StackPanel>
             </Expander>
         </StackPanel>
