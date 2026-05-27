@@ -131,3 +131,7 @@ dmypy.json
 # Xcode user-specific state
 **/xcuserdata/
 *.xcuserstate
+
+# .NET / WinUI build output
+winui/**/bin/
+winui/**/obj/

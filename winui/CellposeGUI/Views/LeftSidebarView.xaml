@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<UserControl
+    x:Class="CellposeGUI.Views.LeftSidebarView"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    HorizontalAlignment="Stretch"
+    HorizontalContentAlignment="Stretch"
+    mc:Ignorable="d">
+    <ScrollViewer HorizontalAlignment="Stretch" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
+        <StackPanel Padding="8" Spacing="8" HorizontalAlignment="Stretch">
+            <Expander Header="Navigation" IsExpanded="True" x:Name="NavigationGroup" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
+                <StackPanel x:Name="AxisPanel" Spacing="6" HorizontalAlignment="Stretch" />
+            </Expander>
+
+            <Expander Header="Views" IsExpanded="True" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
+                <StackPanel Spacing="8" HorizontalAlignment="Stretch">
+                    <ComboBox x:Name="ViewModeCombo" Header="View" HorizontalAlignment="Stretch" />
+                    <ToggleSwitch x:Name="Norm3DToggle" Header="norm3D" />
+                    <Button x:Name="AutoSaturationButton" Content="auto saturation" HorizontalAlignment="Left" />
+                    <Grid HorizontalAlignment="Stretch">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="28" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="36" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="min" VerticalAlignment="Center" />
+                        <Slider x:Name="GrayLowSlider" Grid.Column="1" Minimum="0" Maximum="255" StepFrequency="1" Value="0" HorizontalAlignment="Stretch" />
+                        <TextBlock x:Name="GrayLowValueText" Grid.Column="2" Margin="6,0,0,0" VerticalAlignment="Center" Text="0" />
+                    </Grid>
+                    <Grid HorizontalAlignment="Stretch">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="28" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="36" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="max" VerticalAlignment="Center" />
+                        <Slider x:Name="GrayHighSlider" Grid.Column="1" Minimum="0" Maximum="255" StepFrequency="1" Value="255" HorizontalAlignment="Stretch" />
+                        <TextBlock x:Name="GrayHighValueText" Grid.Column="2" Margin="6,0,0,0" VerticalAlignment="Center" Text="255" />
+                    </Grid>
+                </StackPanel>
+            </Expander>
+
+            <Expander Header="Preprocessing" IsExpanded="True" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
+                <StackPanel Spacing="8" HorizontalAlignment="Stretch">
+                    <NumberBox x:Name="SharpenRadiusBox" Header="sharpen radius" HorizontalAlignment="Stretch" SpinButtonPlacementMode="Inline" />
+                    <NumberBox x:Name="SmoothRadiusBox" Header="smooth radius" HorizontalAlignment="Stretch" SpinButtonPlacementMode="Inline" />
+                    <NumberBox x:Name="TileNormBlocksizeBox" Header="tile norm blocksize" HorizontalAlignment="Stretch" SpinButtonPlacementMode="Inline" />
+                    <NumberBox x:Name="TileNormSmooth3DBox" Header="tile norm smooth3D" HorizontalAlignment="Stretch" SpinButtonPlacementMode="Inline" />
+                    <ToggleSwitch x:Name="SaveRestoredToggle" Header="save restored/filtered image" />
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <Button x:Name="ResetPreprocessButton" Content="reset" />
+                        <Button x:Name="ApplyPreprocessButton" Content="apply" />
+                    </StackPanel>
+                </StackPanel>
+            </Expander>
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

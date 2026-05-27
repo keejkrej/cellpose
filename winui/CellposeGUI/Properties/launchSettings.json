@@ -1,0 +1,10 @@
+{
+  "profiles": {
+    "CellposeGUI (Package)": {
+      "commandName": "MsixPackage"
+    },
+    "CellposeGUI (Unpackaged)": {
+      "commandName": "Project"
+    }
+  }
+}
