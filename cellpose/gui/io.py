@@ -482,16 +482,16 @@ def _load_seg(parent, filename=None, image=None, image_file=None, load_3D=False)
                 if median is not None:
                     parent.cellcolors = np.append(parent.cellcolors,
                                                   color[np.newaxis, :], axis=0)
-                    parent.ncells += 1
+                    parent.ncells_counter += 1
         else:
             if dat["masks"].min() == -1:
                 dat["masks"] += 1
                 dat["outlines"] += 1
-            parent.ncells.set(dat["masks"].max())
-            if "colors" in dat and len(dat["colors"]) == dat["masks"].max():
+            ncells = int(dat["masks"].max())
+            if "colors" in dat and len(dat["colors"]) == ncells:
                 colors = dat["colors"]
             else:
-                colors = parent.colormap[:parent.ncells.get(), :3]
+                colors = parent.colormap[:ncells, :3]
 
             _masks_to_gui(parent, dat["masks"], outlines=dat["outlines"], colors=colors)
 
@@ -503,14 +503,14 @@ def _load_seg(parent, filename=None, image=None, image_file=None, load_3D=False)
         if "zdraw" in dat:
             parent.zdraw = dat["zdraw"]
         else:
-            parent.zdraw = [None for n in range(parent.ncells.get())]
+            parent.zdraw = [None for n in range(parent.ncells())]
         parent.loaded = True
     else:
         parent.clear_all()
 
-    parent.ismanual = np.zeros(parent.ncells.get(), bool)
+    parent.ismanual = np.zeros(parent.ncells(), bool)
     if "ismanual" in dat:
-        if len(dat["ismanual"]) == parent.ncells:
+        if len(dat["ismanual"]) == parent.ncells():
             parent.ismanual = dat["ismanual"]
 
     if hasattr(parent, "set_instance_classes"):
@@ -574,7 +574,7 @@ def _load_masks(parent, filename=None):
         return
 
     _masks_to_gui(parent, masks, outlines)
-    if parent.ncells > 0:
+    if parent.ncells() > 0:
         parent.draw_layer()
         parent.toggle_mask_ops()
     del masks
@@ -652,16 +652,18 @@ def _masks_to_gui(parent, masks, outlines=None, colors=None):
             if parent.outpix_orig.ndim == 2:
                 parent.outpix_orig = parent.outpix_orig[np.newaxis, :, :]
 
-    parent.ncells.set(parent.cellpix.max())
-    colors = parent.colormap[:parent.ncells.get(), :3] if colors is None else colors
+    ncells = int(parent.cellpix.max())
+    if hasattr(parent, "ncells_counter"):
+        parent.ncells_counter.set(ncells)
+    colors = parent.colormap[:ncells, :3] if colors is None else colors
     print("GUI_INFO: creating cellcolors and drawing masks")
     parent.cellcolors = np.concatenate((np.array([[255, 255, 255]]), colors),
                                        axis=0).astype(np.uint8)
-    if parent.ncells > 0:
+    if ncells > 0:
         parent.draw_layer()
         parent.toggle_mask_ops()
-    parent.ismanual = np.zeros(parent.ncells.get(), bool)
-    parent.zdraw = list(-1 * np.ones(parent.ncells.get(), np.int16))
+    parent.ismanual = np.zeros(ncells, bool)
+    parent.zdraw = list(-1 * np.ones(ncells, np.int16))
     if hasattr(parent, "set_instance_classes"):
         parent.set_instance_classes()
 
@@ -829,7 +831,7 @@ def _save_sets(parent):
         )
     try:
         np.save(base + "_seg.npy", dat)
-        print("GUI_INFO: %d ROIs saved to %s" % (parent.ncells.get(), base + "_seg.npy"))
+        print("GUI_INFO: %d ROIs saved to %s" % (parent.ncells(), base + "_seg.npy"))
     except Exception as e:
         print(f"ERROR: {e}")
     del dat
