@@ -61,49 +61,13 @@ public sealed class CellposeSessionStore
     public LoadedSession Load(string path, ImageLoaderService imageLoader)
     {
         using var archive = ZipFile.OpenRead(path);
-        var manifestEntry = archive.GetEntry("manifest.json")
-            ?? throw new SidecarException("Invalid session file: missing manifest.json");
-
-        SessionManifest manifest;
-        using (var stream = manifestEntry.Open())
-            manifest = JsonSerializer.Deserialize<SessionManifest>(stream, JsonOptions)
-                       ?? throw new SidecarException("Invalid session manifest");
-
-        if (manifest.Version != 1)
-            throw new SidecarException($"Unsupported session version: {manifest.Version}");
-
-        var sourceImage = manifest.SourceImage;
-        if (!Path.IsPathRooted(sourceImage))
-            sourceImage = Path.GetFullPath(Path.Combine(Path.GetDirectoryName(path)!, sourceImage));
-
+        var manifest = ReadManifest(archive, path);
+        var sourceImage = ResolveSourceImage(manifest.SourceImage, path);
         if (!File.Exists(sourceImage))
             throw new SidecarException($"Source image not found: {sourceImage}");
 
-        var masksEntry = manifest.Arrays["masks"];
-        var labels = ReadMaskLabels(archive, masksEntry);
-        byte[][] colors = manifest.Arrays.TryGetValue("colors", out var colorsEntry)
-            ? ReadColors(archive, colorsEntry)
-            : MaskEditService.DefaultColors(labels.Max());
-
-        var flows = new List<ArrayPayload>();
-        for (var i = 0; ; i++)
-        {
-            if (!manifest.Arrays.TryGetValue($"flows_{i}", out var flowEntry))
-                break;
-            flows.Add(ReadPayload(archive, flowEntry));
-        }
-
-        var width = masksEntry.Shape[^1];
-        var height = masksEntry.Shape[^2];
-        var maskData = new MaskData
-        {
-            Width = width,
-            Height = height,
-            Labels = labels,
-            Colors = colors,
-            OutlineLabels = MaskEditService.ComputeOutlineLabels(labels, width, height),
-        };
-
+        var maskData = ReadMaskData(archive, manifest);
+        var flows = ReadFlows(archive, manifest);
         return new LoadedSession
         {
             ImagePath = sourceImage,
@@ -114,6 +78,86 @@ public sealed class CellposeSessionStore
             Model = manifest.Model,
             Segmentation = manifest.Segmentation,
         };
+    }
+
+    public LoadedSession LoadCompanion(string sessionPath, string imagePath, ImageData image)
+    {
+        using var archive = ZipFile.OpenRead(sessionPath);
+        var manifest = ReadManifest(archive, sessionPath);
+        var maskData = ReadMaskData(archive, manifest);
+        if (maskData.Width != image.Width || maskData.Height != image.Height)
+        {
+            throw new SidecarException(
+                $"Session mask size {maskData.Width}x{maskData.Height} does not match image {image.Width}x{image.Height}");
+        }
+
+        return new LoadedSession
+        {
+            ImagePath = imagePath,
+            Image = image,
+            Masks = maskData,
+            Flows = ReadFlows(archive, manifest),
+            RecomputeMasks = manifest.RecomputeMasks,
+            Model = manifest.Model,
+            Segmentation = manifest.Segmentation,
+        };
+    }
+
+    private static SessionManifest ReadManifest(ZipArchive archive, string sessionPath)
+    {
+        var manifestEntry = archive.GetEntry("manifest.json")
+            ?? throw new SidecarException("Invalid session file: missing manifest.json");
+
+        using var stream = manifestEntry.Open();
+        var manifest = JsonSerializer.Deserialize<SessionManifest>(stream, JsonOptions)
+                       ?? throw new SidecarException("Invalid session manifest");
+        if (manifest.Version != 1)
+            throw new SidecarException($"Unsupported session version: {manifest.Version}");
+        return manifest;
+    }
+
+    private static string ResolveSourceImage(string sourceImage, string sessionPath)
+    {
+        if (Path.IsPathRooted(sourceImage))
+            return sourceImage;
+
+        return Path.GetFullPath(Path.Combine(Path.GetDirectoryName(sessionPath)!, sourceImage));
+    }
+
+    private static MaskData ReadMaskData(ZipArchive archive, SessionManifest manifest)
+    {
+        if (!manifest.Arrays.TryGetValue("masks", out var masksEntry))
+            throw new SidecarException("Invalid session file: missing masks array");
+
+        var labels = ReadMaskLabels(archive, masksEntry);
+        var ncells = labels.Length == 0 ? 0 : labels.Max();
+        byte[][] colors = manifest.Arrays.TryGetValue("colors", out var colorsEntry)
+            ? ReadColors(archive, colorsEntry)
+            : MaskEditService.DefaultColors(ncells);
+
+        var width = masksEntry.Shape[^1];
+        var height = masksEntry.Shape[^2];
+        return new MaskData
+        {
+            Width = width,
+            Height = height,
+            Labels = labels,
+            Colors = colors,
+            OutlineLabels = MaskEditService.ComputeOutlineLabels(labels, width, height),
+        };
+    }
+
+    private static List<ArrayPayload> ReadFlows(ZipArchive archive, SessionManifest manifest)
+    {
+        var flows = new List<ArrayPayload>();
+        for (var i = 0; ; i++)
+        {
+            if (!manifest.Arrays.TryGetValue($"flows_{i}", out var flowEntry))
+                break;
+            flows.Add(ReadPayload(archive, flowEntry));
+        }
+
+        return flows;
     }
 
     private static void WriteUInt16Array(

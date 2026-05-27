@@ -403,6 +403,26 @@ public sealed class MainViewModel : ObservableObject
         ApplyMaskUpdate(loaded.Masks);
     }
 
+    private async Task<(ImageData Image, LoadedSession? Companion)> LoadImageWithOptionalCompanionAsync(string path)
+    {
+        var image = await Task.Run(() => _imageLoader.Load(path));
+        if (_autoloadMasks || !File.Exists(_sessionStore.DefaultPath(path)))
+            return (image, null);
+
+        var companion = await Task.Run(() =>
+        {
+            try
+            {
+                return _sessionStore.LoadCompanion(_sessionStore.DefaultPath(path), path, image);
+            }
+            catch
+            {
+                return null;
+            }
+        });
+        return (image, companion);
+    }
+
     public void ApplyMaskUpdate(MaskData masks, int? appendedClassId = null)
     {
         if (!_dispatcher.HasThreadAccess)
@@ -543,7 +563,14 @@ public sealed class MainViewModel : ObservableObject
     public async Task LoadImageAsync(string path) =>
         await RunTaskAsync("Loading image…", async () =>
         {
-            var image = await Task.Run(() => _imageLoader.Load(path));
+            var (image, companion) = await LoadImageWithOptionalCompanionAsync(path);
+            if (companion != null)
+            {
+                ApplyLoadedSession(companion);
+                StatusMessage = $"Loaded {Path.GetFileName(path)} with segmentation";
+                return;
+            }
+
             ApplyLoadedImage(path, image);
             StatusMessage = $"Loaded {Path.GetFileName(path)}";
         });
@@ -598,13 +625,16 @@ public sealed class MainViewModel : ObservableObject
             var recordIndex = ResolveCurrentSeriesRecordIndex() ?? 0;
             recordIndex = Math.Clamp(recordIndex, 0, discovery.Records.Count - 1);
             var record = discovery.Records[recordIndex];
-            var image = await Task.Run(() => _imageLoader.Load(record.Path));
+            var (image, companion) = await LoadImageWithOptionalCompanionAsync(record.Path);
 
             var loadedIndex = recordIndex;
             await ApplyOnUiAsync(() =>
             {
                 SeriesState.RecordIndex = loadedIndex;
-                ApplyLoadedImage(record.Path, image);
+                if (companion != null)
+                    ApplyLoadedSession(companion);
+                else
+                    ApplyLoadedImage(record.Path, image);
                 SetStatus($"Loaded series with {discovery.RecordCount} records");
             }).ConfigureAwait(false);
         });
@@ -704,8 +734,11 @@ public sealed class MainViewModel : ObservableObject
 
         await RunTaskAsync("Loading frame…", async () =>
         {
-            var image = await Task.Run(() => _imageLoader.Load(record.Path));
-            ApplyLoadedImage(record.Path, image);
+            var (image, companion) = await LoadImageWithOptionalCompanionAsync(record.Path);
+            if (companion != null)
+                ApplyLoadedSession(companion);
+            else
+                ApplyLoadedImage(record.Path, image);
             StatusMessage = record.Label;
         });
     }
@@ -1088,8 +1121,11 @@ public sealed class MainViewModel : ObservableObject
 
         return RunTaskAsync("Loading frame…", async () =>
         {
-            var image = await Task.Run(() => _imageLoader.Load(record.Path));
-            ApplyLoadedImage(record.Path, image);
+            var (image, companion) = await LoadImageWithOptionalCompanionAsync(record.Path);
+            if (companion != null)
+                ApplyLoadedSession(companion);
+            else
+                ApplyLoadedImage(record.Path, image);
             SetStatus(record.Label);
         });
     }
