@@ -10,7 +10,7 @@ from .version import version_str
 from cellpose.cli import get_arg_parser
 
 try:
-    from cellpose.gui import view as gui_view
+    from cellpose.gui import run as gui_run
     GUI_ENABLED = True
 except ImportError as err:
     GUI_ERROR = err
@@ -49,7 +49,7 @@ def main():
                         " Install with: uv sync  (requires pyside6, pyqtgraph)"
                     )
             else:
-                gui_view.run()
+                gui_run()
             return
 
     ############################## run cellpose on images ##############################

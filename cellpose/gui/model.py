@@ -348,6 +348,9 @@ class MainModel:
         self.training_params: dict[str, Any] = {}
         self.segmentation_params: dict[str, Any] | None = None
         self.preprocessing_params: dict[str, Any] | None = None
+        self.model_strings: list[str] = []
+        self.last_series_subfolder_template = ""
+        self.last_series_filename_template = ""
         self.reset_training_parameters()
 
     @property

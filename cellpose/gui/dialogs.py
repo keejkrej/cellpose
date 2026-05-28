@@ -8,7 +8,6 @@ os.environ.setdefault("PYQTGRAPH_QT_LIB", "PySide6")
 from PySide6 import QtCore
 from PySide6.QtWidgets import (
     QAbstractItemView,
-    QCheckBox,
     QComboBox,
     QDialog,
     QDialogButtonBox,
@@ -24,13 +23,15 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
+from ..io import get_image_files
 from . import io as gui_io
 
 
 class TrainWindow(QDialog):
-    def __init__(self, parent, model_strings):
-        super().__init__(parent)
-        self.main_window = parent
+    def __init__(self, view, presenter, model_strings):
+        super().__init__(view)
+        self.view = view
+        self.presenter = presenter
         self.setGeometry(100, 100, 800, 480)
         self.setWindowTitle("train settings")
         self.l0 = QHBoxLayout()
@@ -40,13 +41,14 @@ class TrainWindow(QDialog):
         left_column = QVBoxLayout()
         left_column.setAlignment(QtCore.Qt.AlignTop | QtCore.Qt.AlignLeft)
 
+        training_params = presenter.training_params()
         qlabel = QLabel("train data folder")
         qlabel.setAlignment(QtCore.Qt.AlignLeft | QtCore.Qt.AlignVCenter)
         train_data_layout = QHBoxLayout()
         train_data_layout.addWidget(qlabel)
         self.train_folder = QLineEdit(
-            parent.training_params.get(
-                "train_data_folder", parent.training_params.get("model_save_folder", "")
+            training_params.get(
+                "train_data_folder", training_params.get("model_save_folder", "")
             )
         )
         self.train_folder.editingFinished.connect(self._refresh_train_folder_preview)
@@ -58,7 +60,7 @@ class TrainWindow(QDialog):
 
         self.ModelChoose = QComboBox()
         self.ModelChoose.addItems(model_strings)
-        self.ModelChoose.setCurrentIndex(parent.training_params["model_index"])
+        self.ModelChoose.setCurrentIndex(training_params["model_index"])
         qlabel = QLabel("initial model: ")
         qlabel.setAlignment(QtCore.Qt.AlignLeft | QtCore.Qt.AlignVCenter)
         model_layout = QHBoxLayout()
@@ -74,13 +76,13 @@ class TrainWindow(QDialog):
             qlabel.setAlignment(QtCore.Qt.AlignLeft | QtCore.Qt.AlignVCenter)
             param_layout.addWidget(qlabel)
             self.edits.append(QLineEdit())
-            self.edits[-1].setText(str(parent.training_params[label]))
+            self.edits[-1].setText(str(training_params[label]))
             param_layout.addWidget(self.edits[-1])
             left_column.addLayout(param_layout)
 
         qbtn = QDialogButtonBox.Ok | QDialogButtonBox.Cancel
         self.buttonBox = QDialogButtonBox(qbtn)
-        self.buttonBox.accepted.connect(lambda: self.accept(parent))
+        self.buttonBox.accepted.connect(self._accept)
         self.buttonBox.rejected.connect(self.reject)
         left_column.addWidget(self.buttonBox)
         left_column.addStretch(1)
@@ -111,15 +113,17 @@ class TrainWindow(QDialog):
         self.l0.addLayout(right_column)
         self._refresh_train_folder_preview()
 
-    def accept(self, parent):
-        parent.training_params = {
-            "model_index": self.ModelChoose.currentIndex(),
-            "learning_rate": float(self.edits[0].text()),
-            "weight_decay": float(self.edits[1].text()),
-            "n_epochs": int(self.edits[2].text()),
-            "model_name": self.edits[3].text(),
-            "train_data_folder": self.train_folder.text().strip(),
-        }
+    def _accept(self):
+        self.presenter.set_training_parameters(
+            {
+                "model_index": self.ModelChoose.currentIndex(),
+                "learning_rate": float(self.edits[0].text()),
+                "weight_decay": float(self.edits[1].text()),
+                "n_epochs": int(self.edits[2].text()),
+                "model_name": self.edits[3].text(),
+                "train_data_folder": self.train_folder.text().strip(),
+            }
+        )
         self.done(1)
 
     def _refresh_train_folder_preview(self):
@@ -130,7 +134,7 @@ class TrainWindow(QDialog):
             return
 
         try:
-            image_names = self.main_window.get_training_image_files(folder, nested=True)
+            image_names = get_image_files(folder, "_masks", look_one_level_down=True)
             _, train_labels, train_files, _, _ = gui_io._get_train_set(image_names)
         except Exception as e:
             self._add_train_preview_message(str(e))

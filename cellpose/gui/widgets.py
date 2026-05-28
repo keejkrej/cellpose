@@ -80,7 +80,7 @@ class Slider(QWidget):
 
         self.setEnabled(False)
         if parent is not None:
-            self.valueChanged.connect(lambda: self.levelChanged(parent))
+            self.valueChanged.connect(lambda: parent.level_change(self.name))
 
         self.lowerSlider = QSlider(Horizontal)
         self.upperSlider = QSlider(Horizontal)
@@ -135,9 +135,6 @@ class Slider(QWidget):
         )
         if emit:
             self.valueChanged.emit()
-
-    def levelChanged(self, parent):
-        parent.level_change(self.name)
 
 
 class QHLine(QFrame):
@@ -206,24 +203,31 @@ class ImageDraw(pg.ImageItem):
         self.removable = False
 
         self.parent = parent
+        self.controller = None
         self.setDrawKernel(kernel_size=self.parent.brush_size)
-        self.parent.model.drawing.current_stroke = []
-        self.parent.model.drawing.in_stroke = False
+
+    def set_controller(self, controller):
+        self.controller = controller
+        if controller is not None:
+            controller.init_canvas_drawing()
 
     def mouseClickEvent(self, ev):
-        if self.parent.rect_select_mode:
+        controller = self.controller
+        if controller is None:
+            return
+        if controller.canvas_rect_select_mode():
             ev.accept()
             return
-        session = self.parent.model.session
-        selection = self.parent.model.selection
-        drawing = self.parent.model.drawing
+        session = controller.session
+        selection = controller.model.selection
+        drawing = controller.model.drawing
         if session.loaded and not selection.removing_region:
             if (
                 drawing.brush_mode
                 and ev.button() == QtCore.Qt.LeftButton
                 and not ev.double()
                 and not selection.deleting_multiple
-                and not self.parent.rect_select_mode
+                and not controller.canvas_rect_select_mode()
             ):
                 if not drawing.in_stroke:
                     ev.accept()
@@ -232,7 +236,6 @@ class ImageDraw(pg.ImageItem):
                     drawing.in_stroke = True
                     self.drawAt(ev.pos(), ev)
                 else:
-                    # Second click closes the stroke; hover only extends preview.
                     ev.accept()
                     self.drawAt(ev.pos(), ev)
                     self.end_stroke()
@@ -244,48 +247,52 @@ class ImageDraw(pg.ImageItem):
                         idx = session.cellpix[session.current_z][y, x]
                         if idx > 0:
                             if ev.modifiers() & QtCore.Qt.ControlModifier:
-                                self.parent.remove_cell(idx)
+                                controller.remove_cell(idx)
                             elif ev.modifiers() & QtCore.Qt.AltModifier:
-                                self.parent.merge_cells(idx)
+                                controller.merge_cells(idx)
                             elif (
                                 not selection.deleting_multiple
-                                and not self.parent.rect_select_mode
+                                and not controller.canvas_rect_select_mode()
                             ):
-                                self.parent.unselect_cell()
-                                self.parent.select_cell(idx)
+                                controller.unselect_cell()
+                                controller.select_cell(idx)
                             elif selection.deleting_multiple:
                                 if idx in selection.removing_cells_list:
-                                    self.parent.unselect_cell_multi(idx)
+                                    controller.unselect_cell_multi(idx)
                                     selection.removing_cells_list.remove(idx)
                                 else:
-                                    self.parent.select_cell_multi(idx)
+                                    controller.select_cell_multi(idx)
                                     selection.removing_cells_list.append(idx)
 
                         elif not selection.deleting_multiple:
-                            self.parent.unselect_cell()
+                            controller.unselect_cell()
 
     def mouseDragEvent(self, ev):
         ev.ignore()
         return
 
     def hoverEvent(self, ev):
-        # Extend preview while drawing; never auto-close on proximity to start.
-        if self.parent.model.drawing.in_stroke:
+        controller = self.controller
+        if controller is not None and controller.model.drawing.in_stroke:
             self.drawAt(ev.pos())
 
     def create_start(self, pos):
+        brush_size = self.parent.brush_size
         self.scatter = pg.ScatterPlotItem(
             [pos.x()],
             [pos.y()],
             pxMode=False,
-            pen=pg.mkPen(color=(255, 0, 0), width=self.parent.brush_size),
-            size=max(3 * 2, self.parent.brush_size * 1.8 * 2),
+            pen=pg.mkPen(color=(255, 0, 0), width=brush_size),
+            size=max(3 * 2, brush_size * 1.8 * 2),
             brush=None,
         )
         self.parent.p0.addItem(self.scatter)
 
     def end_stroke(self):
-        drawing = self.parent.model.drawing
+        controller = self.controller
+        if controller is None:
+            return
+        drawing = controller.model.drawing
         self.parent.p0.removeItem(self.scatter)
         if not drawing.stroke_appended:
             drawing.strokes.append(drawing.current_stroke)
@@ -294,17 +301,20 @@ class ImageDraw(pg.ImageItem):
             ioutline = drawing.current_stroke[:, 3] == 1
             drawing.current_point_set.append(list(drawing.current_stroke[ioutline]))
             drawing.current_stroke = []
-            self.parent.add_set()
+            controller.add_set()
         if len(drawing.current_point_set) and len(drawing.current_point_set[0]) > 0:
-            self.parent.add_set()
+            controller.add_set()
         drawing.in_stroke = False
 
     def tabletEvent(self, ev):
         pass
 
     def drawAt(self, pos, ev=None):
-        session = self.parent.model.session
-        drawing = self.parent.model.drawing
+        controller = self.controller
+        if controller is None:
+            return
+        session = controller.session
+        drawing = controller.model.drawing
         mask = self.strokemask
         stroke = drawing.current_stroke
         pos = [int(pos.y()), int(pos.x())]

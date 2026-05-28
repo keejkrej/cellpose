@@ -2,7 +2,7 @@
 Presenter-facing view contract for the Cellpose GUI MVP stack.
 
 MainView implements this protocol: widget I/O, canvas rendering, and chrome only.
-Session state lives on MainModel; the presenter reads/writes self.model directly.
+Session state lives on MainModel; MainPresenter reads/writes the model directly.
 """
 
 from __future__ import annotations

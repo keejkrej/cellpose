@@ -2,71 +2,67 @@
 Copyright © 2025 Howard Hughes Medical Institute, Authored by Carsen Stringer , Michael Rariden and Marius Pachitariu.
 """
 from PySide6.QtGui import QAction
-from . import io
 
 
-def mainmenu(parent):
-    main_menu = parent.menuBar()
+def mainmenu(view, presenter):
+    main_menu = view.menuBar()
     file_menu = main_menu.addMenu("&File")
-    loadImg = QAction("&Load image", parent)
-    loadImg.triggered.connect(lambda: io._load_image(parent))
+    loadImg = QAction("&Load image", view)
+    loadImg.triggered.connect(presenter.load_image)
     file_menu.addAction(loadImg)
 
-    loadFolderPattern = QAction("Load &folder", parent)
-    loadFolderPattern.triggered.connect(lambda: io._load_image_series(parent))
+    loadFolderPattern = QAction("Load &folder", view)
+    loadFolderPattern.triggered.connect(presenter.load_image_series)
     file_menu.addAction(loadFolderPattern)
 
-    parent.saveResults = QAction("&Save results", parent)
-    parent.saveResults.triggered.connect(lambda: io._save_sets(parent))
-    file_menu.addAction(parent.saveResults)
-    parent.saveResults.setEnabled(False)
+    view.saveResults = QAction("&Save results", view)
+    view.saveResults.triggered.connect(presenter.save_sets)
+    file_menu.addAction(view.saveResults)
+    view.saveResults.setEnabled(False)
 
 
-def editmenu(parent):
-    main_menu = parent.menuBar()
+def editmenu(view, presenter):
+    main_menu = view.menuBar()
     edit_menu = main_menu.addMenu("&Edit")
-    parent.undo = QAction("Undo previous mask/trace", parent)
-    parent.undo.triggered.connect(parent.undo_action)
-    parent.undo.setEnabled(False)
-    edit_menu.addAction(parent.undo)
+    view.undo = QAction("Undo previous mask/trace", view)
+    view.undo.triggered.connect(presenter.undo_action)
+    view.undo.setEnabled(False)
+    edit_menu.addAction(view.undo)
 
-    parent.redo = QAction("Undo remove mask", parent)
-    parent.redo.triggered.connect(parent.undo_remove_action)
-    parent.redo.setEnabled(False)
-    edit_menu.addAction(parent.redo)
+    view.redo = QAction("Undo remove mask", view)
+    view.redo.triggered.connect(presenter.undo_remove_cell)
+    view.redo.setEnabled(False)
+    edit_menu.addAction(view.redo)
 
-    parent.ClearButton = QAction("Clear all masks", parent)
-    parent.ClearButton.triggered.connect(parent.clear_all)
-    parent.ClearButton.setEnabled(False)
-    edit_menu.addAction(parent.ClearButton)
+    view.ClearButton = QAction("Clear all masks", view)
+    view.ClearButton.triggered.connect(presenter.clear_all)
+    view.ClearButton.setEnabled(False)
+    edit_menu.addAction(view.ClearButton)
 
-    parent.remcell = QAction("Remove selected cell (Ctrl+CLICK)", parent)
-    parent.remcell.triggered.connect(parent.remove_action)
-    parent.remcell.setEnabled(False)
-    edit_menu.addAction(parent.remcell)
+    view.remcell = QAction("Remove selected cell (Ctrl+CLICK)", view)
+    view.remcell.triggered.connect(presenter.remove_selected_cells)
+    view.remcell.setEnabled(False)
+    edit_menu.addAction(view.remcell)
 
-    parent.mergecell = QAction("FYI: Merge cells by Alt+Click", parent)
-    parent.mergecell.setEnabled(False)
-    edit_menu.addAction(parent.mergecell)
+    view.mergecell = QAction("FYI: Merge cells by Alt+Click", view)
+    view.mergecell.setEnabled(False)
+    edit_menu.addAction(view.mergecell)
 
 
-def modelmenu(parent):
-    main_menu = parent.menuBar()
-    io._init_model_list(parent)
+def modelmenu(view, presenter):
+    main_menu = view.menuBar()
     model_menu = main_menu.addMenu("&Models")
-    parent.addmodel = QAction("Add custom torch model to GUI", parent)
-    #parent.addmodel.setShortcut("Ctrl+A")
-    parent.addmodel.triggered.connect(parent.add_model)
-    parent.addmodel.setEnabled(True)
-    model_menu.addAction(parent.addmodel)
+    view.addmodel = QAction("Add custom torch model to GUI", view)
+    view.addmodel.triggered.connect(presenter.add_model)
+    view.addmodel.setEnabled(True)
+    model_menu.addAction(view.addmodel)
 
-    parent.removemodel = QAction("Remove selected custom model from GUI", parent)
-    #parent.removemodel.setShortcut("Ctrl+R")
-    parent.removemodel.triggered.connect(parent.remove_model)
-    parent.removemodel.setEnabled(True)
-    model_menu.addAction(parent.removemodel)
+    view.removemodel = QAction("Remove selected custom model from GUI", view)
+    view.removemodel.triggered.connect(presenter.remove_model)
+    view.removemodel.setEnabled(True)
+    model_menu.addAction(view.removemodel)
 
-    parent.newmodel = QAction("&Train new model with image+masks in folder", parent)
-    parent.newmodel.triggered.connect(parent.new_model)
-    parent.newmodel.setEnabled(False)
-    model_menu.addAction(parent.newmodel)
+    view.newmodel = QAction("&Train new model with image+masks in folder", view)
+    view.newmodel.triggered.connect(presenter.train_new_model)
+    view.newmodel.setEnabled(False)
+    model_menu.addAction(view.newmodel)

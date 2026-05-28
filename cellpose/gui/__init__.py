@@ -2,7 +2,8 @@
 
 from .model import MainModel
 from .presenter import MainPresenter
-from .view import MainView, MainW, run
+from .app import run
+from .view import MainView, MainW
 from .view_protocol import LabelRow, MainViewProtocol, SeriesNavViewState
 
 __all__ = [

@@ -23,11 +23,12 @@ from ..plot import disk
 from ..transforms import normalize99, resize_image
 from . import io, series
 from .model import InstanceClasses, MainModel, SegmentationParameters, SeriesState
+from .presenter_gui import PresenterGuiMixin
 from .presenter_masks import add_mask_from_points, paint_mask_at
 from .view_protocol import LabelRow, SeriesNavViewState
 
 
-class MainPresenter:
+class MainPresenter(PresenterGuiMixin):
     def __init__(self, view, model: MainModel):
         self.view = view
         self.model = model
@@ -262,6 +263,7 @@ class MainPresenter:
             stroke = np.array(self.model.drawing.strokes[i])
             layerz[stroke[:, 1], stroke[:, 2]] = np.array([255, 0, 255, 100])
         self.view.render_mask_overlay(layerz)
+        self.refresh_selection_boxes()
         self.view.show_window()
 
     def selection_bounds(self) -> list[tuple[int, int, int, int]]:
@@ -315,8 +317,7 @@ class MainPresenter:
         idx = (idx - 1) % len(images)
         if self.model.series_state.dataset is not None:
             try:
-                io._load_series_item(
-                    self.view,
+                self.load_series_item(
                     self.model.series_state.dataset,
                     idx,
                 )
@@ -324,15 +325,14 @@ class MainPresenter:
                 print(f"ERROR: {e}")
                 self.view.show_message("Load folder with pattern", str(e))
         else:
-            io._load_image(self.view, filename=images[idx])
+            self.load_image(filename=images[idx])
 
     def get_next_image(self, load_seg: bool = True) -> None:
         images, idx = self.get_files()
         idx = (idx + 1) % len(images)
         if self.model.series_state.dataset is not None:
             try:
-                io._load_series_item(
-                    self.view,
+                self.load_series_item(
                     self.model.series_state.dataset,
                     idx,
                     load_seg=load_seg,
@@ -341,7 +341,7 @@ class MainPresenter:
                 print(f"ERROR: {e}")
                 self.view.show_message("Load folder with pattern", str(e))
         else:
-            io._load_image(self.view, filename=images[idx], load_seg=load_seg)
+            self.load_image(filename=images[idx], load_seg=load_seg)
 
     def navigate_series_from_sliders(
         self, axis_name: str | None = None, delta: int = 0
@@ -390,11 +390,7 @@ class MainPresenter:
             return
 
         try:
-            io._load_series_item(
-                self.view,
-                dataset,
-                record_index,
-            )
+            self.load_series_item(dataset, record_index)
         except Exception as e:
             self.view.set_series_navigation(
                 self._series_nav_state(dataset, self.model.series_state.record_index)
@@ -416,6 +412,7 @@ class MainPresenter:
         self.clear_all()
         self.reset_series()
         self.view.autoSaturationButton.setEnabled(False)
+        self.update_canvas_cursor()
 
     def clear_all(self) -> None:
         self.model.clear_masks()
@@ -438,7 +435,9 @@ class MainPresenter:
         self.model.series_state.display_filename = display_filename or filename
         self.model.series_state.output_filename = None
         self.model.session.loaded = True
-        self.view.set_loaded_chrome(True)
+        self.view.set_loaded_chrome(True, ncells=self.ncells())
+        self.refresh_plot()
+        self.update_canvas_cursor()
 
     def refresh_scale_from_model(self) -> None:
         params = self.segmentation_parameters_dict()
@@ -487,9 +486,7 @@ class MainPresenter:
         else:
             for _ in range(self.session.nz):
                 self.session.saturation[0].append([0, 255.0])
-        self.view.refresh_plot_from_model()
-
-    # ---- cells / masks ----
+        self.refresh_plot()
 
     def remove_cell(self, idx) -> None:
         if isinstance(idx, (int, np.integer)):
@@ -528,7 +525,7 @@ class MainPresenter:
         self.refresh_mask_layer()
         if self.ncells() == 0:
             self.view.set_mask_action_enabled(False)
-        io._save_sets(self.view)
+        self.save_sets()
 
     def _remove_single_cell(self, idx: int) -> None:
         self.remove_cell(idx)
@@ -554,7 +551,7 @@ class MainPresenter:
                     self.view.set_mask_action_enabled(True)
                     self.refresh_labels_table()
                     self.refresh_mask_layer()
-                    io._save_sets(self.view)
+                    self.save_sets()
             else:
                 print("GUI_ERROR: cell too small, not drawn")
             drawing.current_stroke = []
@@ -658,7 +655,7 @@ class MainPresenter:
             self.session.zdraw.append([])
             self.view.set_mask_action_enabled(True)
             self.refresh_mask_layer()
-            io._save_sets(self.view)
+            self.save_sets()
             selection.removed_cell = []
             self.view.set_redo_enabled(False)
 
@@ -710,7 +707,7 @@ class MainPresenter:
         self.view.logger.info("%d cells found" % (len(np.unique(maski)[1:])))
         self._apply_masks_to_view(maski)
         self.view.show_window()
-        io._save_sets(self.view)
+        self.save_sets()
 
     def initialize_model(self, model_name=None, custom=False) -> None:
         if model_name is None or custom:
@@ -809,7 +806,7 @@ class MainPresenter:
             self._apply_masks_to_view(masks)
             self.view.set_progress(100)
             self.session.recompute_masks = True
-            io._save_sets(self.view)
+            self.save_sets()
         except Exception as e:
             print("ERROR: %s" % e)
 
@@ -851,8 +848,10 @@ class MainPresenter:
         else:
             self.session.recompute_masks = False
         self.model.session.loaded = True
-        self.view.set_loaded_chrome(True)
+        self.view.set_loaded_chrome(True, ncells=self.ncells())
+        self.update_canvas_cursor()
         self.refresh_mask_layer()
+        self.refresh_plot()
 
     def save_sets(self) -> None:
         from cellpose.gui.session_format import write_session
@@ -912,7 +911,7 @@ class MainPresenter:
             except ValueError as e:
                 self.view.logger.info(str(e))
                 train_files = []
-        tw = TrainWindow(self.view, models.MODEL_NAMES)
+        tw = TrainWindow(self.view, self, models.MODEL_NAMES)
         if tw.exec():
             train_data_folder = self.training_params().get("train_data_folder", "")
             if not train_data_folder:
@@ -975,7 +974,7 @@ class MainPresenter:
             save_to_models_dir=False,
         )[:2]
         np.save(str(new_model_path) + "_train_losses.npy", train_losses)
-        io._add_model(self.view, new_model_path)
+        self.add_model_file(new_model_path)
         self.session.restore = restore
         self.set_normalize_params(normalize_params)
         self.clear_all()
@@ -985,8 +984,3 @@ class MainPresenter:
             f"!!! computed masks for {os.path.split(self.model.filename)[1]} from new model !!!"
         )
 
-    def add_model(self, filename=None) -> None:
-        io._add_model(self.view, filename=filename)
-
-    def remove_model(self) -> None:
-        io._remove_model(self.view)
