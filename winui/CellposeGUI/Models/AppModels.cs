@@ -52,10 +52,6 @@ public sealed class SegmentationParameters : ObservableObject
     private double _percentileHigh = 99;
     private int _niter;
     private int _minSize = 15;
-    private double _stitchThreshold;
-    private double _anisotropy = 1;
-    private double _flow3DSmooth;
-    private bool _do3D;
 
     public double Diameter
     {
@@ -99,32 +95,6 @@ public sealed class SegmentationParameters : ObservableObject
         set => SetProperty(ref _minSize, value);
     }
 
-    public double StitchThreshold
-    {
-        get => _stitchThreshold;
-        set => SetProperty(ref _stitchThreshold, value);
-    }
-
-    public double Anisotropy
-    {
-        get => _anisotropy;
-        set => SetProperty(ref _anisotropy, value);
-    }
-
-    [JsonPropertyName("flow3D_smooth")]
-    public double Flow3DSmooth
-    {
-        get => _flow3DSmooth;
-        set => SetProperty(ref _flow3DSmooth, value);
-    }
-
-    [JsonPropertyName("do_3D")]
-    public bool Do3D
-    {
-        get => _do3D;
-        set => SetProperty(ref _do3D, value);
-    }
-
     public void CopyFrom(SegmentationParameters other)
     {
         Diameter = other.Diameter;
@@ -134,10 +104,6 @@ public sealed class SegmentationParameters : ObservableObject
         PercentileHigh = other.PercentileHigh;
         Niter = other.Niter;
         MinSize = other.MinSize;
-        StitchThreshold = other.StitchThreshold;
-        Anisotropy = other.Anisotropy;
-        Flow3DSmooth = other.Flow3DSmooth;
-        Do3D = other.Do3D;
     }
 
     public SegmentationParameters Clone() => new()
@@ -149,10 +115,6 @@ public sealed class SegmentationParameters : ObservableObject
         PercentileHigh = PercentileHigh,
         Niter = Niter,
         MinSize = MinSize,
-        StitchThreshold = StitchThreshold,
-        Anisotropy = Anisotropy,
-        Flow3DSmooth = Flow3DSmooth,
-        Do3D = Do3D,
     };
 }
 
@@ -176,8 +138,6 @@ public sealed class DisplayParameters : ObservableObject
 
 public sealed class TrainingParameters
 {
-    [JsonPropertyName("model_index")]
-    public int ModelIndex { get; set; }
     [JsonPropertyName("learning_rate")]
     public double LearningRate { get; set; } = 1e-5;
     [JsonPropertyName("weight_decay")]

@@ -190,16 +190,12 @@ class MainView(QMainWindow):
         self.last_series_filename_template = ""
         self.reset()
 
-        self.load_3D = False
 
         # if called with image, load it
         if image is not None:
             self.model.filename = image
             io._load_image(self, self.model.filename)
 
-        self.stitch_threshold = 0.0
-        self.flow3D_smooth = 0.0
-        self.anisotropy = 1.0
         self.min_size = 15
 
         self.setAcceptDrops(True)
@@ -283,10 +279,6 @@ class MainView(QMainWindow):
             return cast(value.text())
 
         return {
-            "load_3D": bool(self.load_3D),
-            "stitch_threshold": _read_value("stitch_threshold", float),
-            "anisotropy": _read_value("anisotropy", float),
-            "flow3D_smooth": _read_value("flow3D_smooth", float),
             "min_size": _read_value("min_size", int),
         }
 
@@ -777,18 +769,12 @@ class MainView(QMainWindow):
         self.presenter.run_selected_model()
 
     def model_choose(self, custom=False):
-        if custom:
-            model_name, is_custom = self._selected_segmentation_model()
-            if model_name:
-                print(f"GUI_INFO: selected model {model_name}, loading now")
-                self.initialize_model(model_name=model_name, custom=is_custom)
+        if not custom:
             return
-
-        index = self.ModelChooseB.currentIndex()
-        if index > 0:
-            model_name = self.net_names[index - 1]
+        model_name, is_custom = self._selected_segmentation_model()
+        if model_name:
             print(f"GUI_INFO: selected model {model_name}, loading now")
-            self.initialize_model(model_name=model_name, custom=custom)
+            self.initialize_model(model_name=model_name, custom=is_custom)
 
     def toggle_scale(self):
         if self.scale_on:
@@ -1131,9 +1117,9 @@ class MainView(QMainWindow):
     def dropEvent(self, event):
         files = [u.toLocalFile() for u in event.mimeData().urls()]
         if os.path.splitext(files[0])[-1] == ".cellpose":
-            io._load_seg(self, filename=files[0], load_3D=self.load_3D)
+            io._load_seg(self, filename=files[0])
         else:
-            io._load_image(self, filename=files[0], load_seg=True, load_3D=self.load_3D)
+            io._load_image(self, filename=files[0], load_seg=True)
 
     def make_viewbox(self):
         self.p0 = ViewBoxNoRightDrag(

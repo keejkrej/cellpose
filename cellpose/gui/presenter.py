@@ -313,14 +313,12 @@ class MainPresenter:
     def get_prev_image(self) -> None:
         images, idx = self.get_files()
         idx = (idx - 1) % len(images)
-        opts = self.view.read_inference_options()
         if self.model.series_state.dataset is not None:
             try:
                 io._load_series_item(
                     self.view,
                     self.model.series_state.dataset,
                     idx,
-                    load_3D=opts["load_3D"],
                 )
             except Exception as e:
                 print(f"ERROR: {e}")
@@ -331,7 +329,6 @@ class MainPresenter:
     def get_next_image(self, load_seg: bool = True) -> None:
         images, idx = self.get_files()
         idx = (idx + 1) % len(images)
-        opts = self.view.read_inference_options()
         if self.model.series_state.dataset is not None:
             try:
                 io._load_series_item(
@@ -339,7 +336,6 @@ class MainPresenter:
                     self.model.series_state.dataset,
                     idx,
                     load_seg=load_seg,
-                    load_3D=opts["load_3D"],
                 )
             except Exception as e:
                 print(f"ERROR: {e}")
@@ -393,13 +389,11 @@ class MainPresenter:
         if record_index == self.model.series_state.record_index:
             return
 
-        opts = self.view.read_inference_options()
         try:
             io._load_series_item(
                 self.view,
                 dataset,
                 record_index,
-                load_3D=opts["load_3D"],
             )
         except Exception as e:
             self.view.set_series_navigation(
@@ -433,8 +427,8 @@ class MainPresenter:
         self.view.render_selection_boxes([])
         self.view.render_rect_select_preview(None)
 
-    def on_initialize_images(self, image: np.ndarray, load_3d: bool = False) -> None:
-        self.model.load_image_stack(image, load_3d=load_3d)
+    def on_initialize_images(self, image: np.ndarray) -> None:
+        self.model.load_image_stack(image)
         self.clear_all()
         self.view.sliders[0].setValue([0, 255])
         self.refresh_scale_from_model()
@@ -486,7 +480,7 @@ class MainPresenter:
         self.session.saturation = [[]]
         if np.ptp(img_gray) > 1e-3:
             for z in range(self.session.nz):
-                plane = img_gray[z] if self.session.nz > 1 else img_gray
+                plane = img_gray[z]
                 x01 = np.percentile(plane, percentile[0])
                 x99 = np.percentile(plane, percentile[1])
                 self.session.saturation[0].append([x01, x99])
@@ -504,7 +498,7 @@ class MainPresenter:
         selection = self.model.selection
         selection.selected = 0
         selection.selected_cells = []
-        if self.session.nz == 1 and len(idx) == 1:
+        if len(idx) == 1:
             i = idx[0]
             cp = self.session.cellpix[0] == i
             op = self.session.outpix[0] == i
@@ -534,8 +528,7 @@ class MainPresenter:
         self.refresh_mask_layer()
         if self.ncells() == 0:
             self.view.set_mask_action_enabled(False)
-        if self.session.nz == 1:
-            io._save_sets(self.view)
+        io._save_sets(self.view)
 
     def _remove_single_cell(self, idx: int) -> None:
         self.remove_cell(idx)
@@ -561,8 +554,7 @@ class MainPresenter:
                     self.view.set_mask_action_enabled(True)
                     self.refresh_labels_table()
                     self.refresh_mask_layer()
-                    if self.session.nz == 1:
-                        io._save_sets(self.view)
+                    io._save_sets(self.view)
             else:
                 print("GUI_ERROR: cell too small, not drawn")
             drawing.current_stroke = []
@@ -708,7 +700,7 @@ class MainPresenter:
             dP=d_p,
             cellprob=cellprob,
             niter=segmentation_params["niter"],
-            do_3D=opts["load_3D"],
+            do_3D=False,
             min_size=opts["min_size"],
             cellprob_threshold=segmentation_params["cellprob_threshold"],
             flow_threshold=segmentation_params["flow_threshold"],
@@ -718,6 +710,7 @@ class MainPresenter:
         self.view.logger.info("%d cells found" % (len(np.unique(maski)[1:])))
         self._apply_masks_to_view(maski)
         self.view.show_window()
+        io._save_sets(self.view)
 
     def initialize_model(self, model_name=None, custom=False) -> None:
         if model_name is None or custom:
@@ -754,12 +747,7 @@ class MainPresenter:
                 self.initialize_model(model_name=model_name, custom=custom)
             self.view.set_progress(10)
             opts = self.view.read_inference_options()
-            do_3d = opts["load_3D"]
-            stitch_threshold = opts["stitch_threshold"]
-            anisotropy = opts["anisotropy"]
-            flow3d_smooth = opts["flow3D_smooth"]
             min_size = opts["min_size"]
-            do_3d = False if stitch_threshold > 0.0 else do_3d
             if self.session.restore == "filter":
                 data = self.session.stack_filtered.copy().squeeze()
             else:
@@ -772,16 +760,15 @@ class MainPresenter:
                     diameter=segmentation_params["diameter"],
                     cellprob_threshold=segmentation_params["cellprob_threshold"],
                     flow_threshold=segmentation_params["flow_threshold"],
-                    do_3D=do_3d,
+                    do_3D=False,
                     niter=segmentation_params["niter"],
                     normalize=normalize_params,
-                    stitch_threshold=stitch_threshold,
-                    anisotropy=anisotropy,
-                    flow3D_smooth=flow3d_smooth,
+                    stitch_threshold=0.0,
+                    anisotropy=1.0,
+                    flow3D_smooth=0.0,
                     min_size=min_size,
                     channel_axis=-1,
                     progress=self.view.progress_widget(),
-                    z_axis=0 if self.session.nz > 1 else None,
                 )[:2]
             except Exception as e:
                 print("NET ERROR: %s" % e)
@@ -794,60 +781,26 @@ class MainPresenter:
                 flows[1].copy(),
                 flows[2].copy(),
             ]
-            if opts["load_3D"]:
-                if stitch_threshold == 0.0:
-                    flows_new.append((flows[1][0] / 10 * 127 + 127).astype("uint8"))
-                else:
-                    flows_new.append(np.zeros(flows[1][0].shape, dtype="uint8"))
-            if not opts["load_3D"]:
-                if self.session.restore and "upsample" in self.session.restore:
-                    self.session.ly, self.session.lx = self.session.lyr, self.session.lxr
-                if flows_new[0].shape[-3:-1] != (self.session.ly, self.session.lx):
-                    self.session.flows = []
-                    for flow_item in flows_new:
-                        self.session.flows.append(
-                            resize_image(
-                                flow_item,
-                                Ly=self.session.ly,
-                                Lx=self.session.lx,
-                                interpolation=cv2.INTER_NEAREST,
-                            )
-                        )
-                else:
-                    self.session.flows = flows_new
-            else:
+            if self.session.restore and "upsample" in self.session.restore:
+                self.session.ly, self.session.lx = self.session.lyr, self.session.lxr
+            if flows_new[0].shape[-3:-1] != (self.session.ly, self.session.lx):
                 self.session.flows = []
-                lz, ly, lx = self.session.nz, self.session.ly, self.session.lx
-                lz0, ly0, lx0 = flows_new[0].shape[:3]
                 for flow_item in flows_new:
-                    flow0 = flow_item
-                    if ly0 != ly:
-                        flow0 = resize_image(
-                            flow0,
-                            Ly=ly,
-                            Lx=lx,
-                            no_channels=flow0.ndim == 3,
+                    self.session.flows.append(
+                        resize_image(
+                            flow_item,
+                            Ly=self.session.ly,
+                            Lx=self.session.lx,
                             interpolation=cv2.INTER_NEAREST,
                         )
-                    if lz0 != lz:
-                        flow0 = np.swapaxes(
-                            resize_image(
-                                np.swapaxes(flow0, 0, 1),
-                                Ly=lz,
-                                Lx=lx,
-                                no_channels=flow0.ndim == 3,
-                                interpolation=cv2.INTER_NEAREST,
-                            ),
-                            0,
-                            1,
-                        )
-                    self.session.flows.append(flow0)
-            if self.session.nz == 1:
-                masks = masks[np.newaxis, ...]
-                self.session.flows = [
-                    self.session.flows[n][np.newaxis, ...]
-                    for n in range(len(self.session.flows))
-                ]
+                    )
+            else:
+                self.session.flows = flows_new
+            masks = masks[np.newaxis, ...]
+            self.session.flows = [
+                self.session.flows[n][np.newaxis, ...]
+                for n in range(len(self.session.flows))
+            ]
             self.view.logger.info(
                 "%d cells found with model in %0.3f sec"
                 % (len(np.unique(masks)[1:]), time.time() - tic)
@@ -855,7 +808,8 @@ class MainPresenter:
             self.view.set_progress(80)
             self._apply_masks_to_view(masks)
             self.view.set_progress(100)
-            self.session.recompute_masks = not do_3d and not stitch_threshold > 0
+            self.session.recompute_masks = True
+            io._save_sets(self.view)
         except Exception as e:
             print("ERROR: %s" % e)
 
@@ -927,9 +881,6 @@ class MainPresenter:
     def train_new_model(self) -> None:
         from .dialogs import TrainWindow
 
-        if self.session.nz != 1:
-            print("ERROR: cannot train model on 3D data")
-            return
         current_train_data_folder = self.training_params().get("train_data_folder", "")
         if not current_train_data_folder:
             current_train_data_folder = (

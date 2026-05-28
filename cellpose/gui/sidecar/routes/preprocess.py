@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException
 
-from ..routes.segment import _session_response
+from ..session_response import session_response
 from ..schemas import PreprocessParams, SessionResponse
 from ..segmentation import apply_preprocessing
 from ..session import SESSIONS
@@ -22,4 +22,4 @@ def preprocess(session_id: str, params: PreprocessParams) -> SessionResponse:
         apply_preprocessing(session, params)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
-    return _session_response(session)
+    return session_response(session)

@@ -5,7 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException
 
 from ..mask_ops import add_mask_from_strokes, merge_cells, remove_cells
-from ..routes.segment import _session_response
+from ..session_response import session_response
 from ..schemas import AddMaskRequest, MergeCellsRequest, RemoveCellsRequest, SessionResponse
 from ..session import SESSIONS
 
@@ -19,7 +19,7 @@ def remove(request: RemoveCellsRequest) -> SessionResponse:
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     remove_cells(session, request.cell_indices)
-    return _session_response(session)
+    return session_response(session)
 
 
 @router.post("/masks/add", response_model=SessionResponse)
@@ -32,7 +32,7 @@ def add(request: AddMaskRequest) -> SessionResponse:
     idx = add_mask_from_strokes(session, request.strokes, color=color, class_id=request.class_id)
     if idx is None:
         raise HTTPException(status_code=400, detail="Cell too small to draw")
-    return _session_response(session)
+    return session_response(session)
 
 
 @router.post("/masks/merge", response_model=SessionResponse)
@@ -42,4 +42,4 @@ def merge(request: MergeCellsRequest) -> SessionResponse:
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     merge_cells(session, request.source_index, request.target_index)
-    return _session_response(session)
+    return session_response(session)

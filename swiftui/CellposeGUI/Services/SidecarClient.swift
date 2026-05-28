@@ -120,14 +120,12 @@ struct SidecarMlEngine: MlInferenceEngine {
 
 private struct InferRequest: Encodable {
     let path: String
-    let load3D = false
     let modelName: String?
     let customModel: Bool
     let params: SegmentationParameters
 
     enum CodingKeys: String, CodingKey {
         case path
-        case load3D = "load_3D"
         case modelName = "model_name"
         case customModel = "custom_model"
         case params

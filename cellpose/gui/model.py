@@ -492,14 +492,11 @@ class MainModel:
             cellpix, filter_class_id, self.instance_visibility.values
         )
 
-    def load_image_stack(self, image: np.ndarray, load_3d: bool = False) -> None:
+    def load_image_stack(self, image: np.ndarray) -> None:
         session = self.session
         session.stack = image
-        if load_3d:
-            session.nz = len(session.stack)
-        else:
-            session.nz = 1
-            session.stack = session.stack[np.newaxis, ...]
+        session.nz = 1
+        session.stack = session.stack[np.newaxis, ...]
 
         img_min = session.stack.min()
         img_max = session.stack.max()
@@ -522,10 +519,7 @@ class MainModel:
         session.saturation = [[[0, 255] for _ in range(session.nz)]]
         session.track_changes = []
         session.loaded = True
-        if load_3d:
-            session.current_z = int(np.floor(session.nz / 2))
-        else:
-            session.current_z = 0
+        session.current_z = 0
 
     def clear_masks(self) -> None:
         session = self.session
@@ -717,46 +711,27 @@ class MainModel:
         segmentation_params = segmentation_params or self.segmentation_params or {}
         normalize_params = normalize_params or self.preprocessing_params or {}
         filename = self.series_state.filename or ""
-        if session.nz > 1:
-            dat: dict[str, Any] = {
-                "outlines": session.outpix,
-                "colors": session.cellcolors[1:],
-                "masks": session.cellpix,
-                "filename": filename,
-                "flows": session.flows,
-                "zdraw": session.zdraw,
-                "model_path": current_model_path,
-                "flow_threshold": segmentation_params.get("flow_threshold", 0.4),
-                "cellprob_threshold": segmentation_params.get("cellprob_threshold", 0.0),
-                "normalize_params": normalize_params,
-                "restore": session.restore,
-                "ratio": session.ratio,
-                "diameter": segmentation_params.get("diameter"),
-            }
-            if session.restore is not None and session.stack_filtered is not None:
-                dat["img_restore"] = session.stack_filtered
-        else:
-            use_resize = session.restore is not None and "upsample" in session.restore
-            dat = {
-                "outlines": session.outpix_resize.squeeze()
-                if use_resize
-                else session.outpix.squeeze(),
-                "colors": session.cellcolors[1:],
-                "masks": session.cellpix_resize.squeeze()
-                if use_resize
-                else session.cellpix.squeeze(),
-                "filename": filename,
-                "flows": session.flows,
-                "ismanual": session.ismanual,
-                "zdraw": session.zdraw,
-                "model_path": current_model_path,
-                "flow_threshold": segmentation_params.get("flow_threshold", 0.4),
-                "cellprob_threshold": segmentation_params.get("cellprob_threshold", 0.0),
-                "normalize_params": normalize_params,
-                "restore": session.restore,
-                "ratio": session.ratio,
-                "diameter": segmentation_params.get("diameter"),
-            }
+        use_resize = session.restore is not None and "upsample" in session.restore
+        dat: dict[str, Any] = {
+            "outlines": session.outpix_resize.squeeze()
+            if use_resize
+            else session.outpix.squeeze(),
+            "colors": session.cellcolors[1:],
+            "masks": session.cellpix_resize.squeeze()
+            if use_resize
+            else session.cellpix.squeeze(),
+            "filename": filename,
+            "flows": session.flows,
+            "ismanual": session.ismanual,
+            "zdraw": session.zdraw,
+            "model_path": current_model_path,
+            "flow_threshold": segmentation_params.get("flow_threshold", 0.4),
+            "cellprob_threshold": segmentation_params.get("cellprob_threshold", 0.0),
+            "normalize_params": normalize_params,
+            "restore": session.restore,
+            "ratio": session.ratio,
+            "diameter": segmentation_params.get("diameter"),
+        }
         if len(self.instances.values) > 0:
             dat["instance_classes"] = self.instances.values
         return dat
@@ -774,14 +749,11 @@ class MainModel:
         session = self.session
         segmentation_params = segmentation_params or self.segmentation_params or {}
         use_resize = session.restore is not None and "upsample" in session.restore
-        if session.nz > 1:
-            masks = np.asarray(session.cellpix)
-        else:
-            masks = np.asarray(
-                session.cellpix_resize.squeeze()
-                if use_resize
-                else session.cellpix.squeeze()
-            )
+        masks = np.asarray(
+            session.cellpix_resize.squeeze()
+            if use_resize
+            else session.cellpix.squeeze()
+        )
 
         flows_list = None
         if session.flows:
@@ -799,7 +771,7 @@ class MainModel:
             instance_classes = np.asarray(self.instances.values, dtype=np.int32)
 
         ismanual = None
-        if session.nz == 1 and len(session.ismanual) > 0:
+        if len(session.ismanual) > 0:
             ismanual = np.asarray(session.ismanual, dtype=bool)
 
         seg = SegmentationMetadata(

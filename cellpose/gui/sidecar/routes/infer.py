@@ -7,7 +7,7 @@ import os
 import numpy as np
 from fastapi import APIRouter, HTTPException
 
-from cellpose.io import imread_2D, imread_3D
+from cellpose.io import imread_2D
 
 from ..arrays import decode_array, encode_array, encode_optional
 from ..schemas import InferRequest, InferResponse, RecomputeFlowsRequest, RecomputeResponse
@@ -28,7 +28,7 @@ def infer(request: InferRequest) -> InferResponse:
         if not os.path.isfile(path):
             raise HTTPException(status_code=404, detail=f"File not found: {path}")
         try:
-            image = imread_2D(path) if not request.load_3D else imread_3D(path)
+            image = imread_2D(path)
         except Exception as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
     elif request.image is not None:

@@ -33,16 +33,11 @@ class SegmentationParams(BaseModel):
     percentile_high: float = 99.0
     niter: int = 200
     min_size: int = 15
-    stitch_threshold: float = 0.0
-    anisotropy: float = 1.0
-    flow3D_smooth: float = 0.0
-    do_3D: bool = False
 
 
 class InferRequest(BaseModel):
     path: str | None = None
     image: ArrayPayload | None = None
-    load_3D: bool = False
     model_name: str | None = None
     custom_model: bool = False
     params: SegmentationParams = Field(default_factory=SegmentationParams)
@@ -100,12 +95,10 @@ class MergeCellsRequest(BaseModel):
 
 class LoadImageRequest(BaseModel):
     path: str
-    load_3D: bool = False
 
 
 class LoadSegRequest(BaseModel):
     path: str
-    load_3D: bool = False
 
 
 class SaveSegRequest(BaseModel):
@@ -127,7 +120,6 @@ class SeriesNavigateRequest(BaseModel):
 class TrainRequest(BaseModel):
     train_data_folder: str
     model_name: str
-    model_index: int = 0
     learning_rate: float = 1e-5
     weight_decay: float = 0.1
     n_epochs: int = 100

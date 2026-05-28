@@ -10,13 +10,11 @@ from fastapi import APIRouter, HTTPException
 
 from cellpose.gui.session_format import default_session_path, read_session, write_session
 from cellpose.gui.session_format.models import SegmentationMetadata, SessionData
-from cellpose.io import imread_2D, imread_3D
+from cellpose.io import imread_2D
 
-from ..arrays import decode_array, encode_array
 from ..mask_ops import apply_masks
-from ..routes.segment import _session_response
 from ..schemas import LoadImageRequest, LoadSegRequest, SaveSegRequest, SessionResponse
-from ..segmentation import display_image_from_stack
+from ..session_response import session_response
 from ..session import SESSIONS, SidecarSession
 
 router = APIRouter(tags=["io"])
@@ -53,13 +51,13 @@ def _sidecar_to_session_data(session: SidecarSession) -> SessionData:
     )
 
 
-def _load_cellpose_session(path: str, load_3D: bool) -> SidecarSession:
+def _load_cellpose_session(path: str) -> SidecarSession:
     session_data = read_session(path)
     image_path = session_data.source_image
     if not os.path.isfile(image_path):
         raise ValueError(f"Source image not found: {image_path}")
 
-    image = imread_2D(image_path) if not load_3D else imread_3D(image_path)
+    image = imread_2D(image_path)
     session = SESSIONS.create(image=np.asarray(image), filename=image_path)
     masks = np.asarray(session_data.masks)
     apply_masks(session, masks)
@@ -85,11 +83,11 @@ def load_image(request: LoadImageRequest) -> SessionResponse:
     if not os.path.isfile(path):
         raise HTTPException(status_code=404, detail=f"File not found: {path}")
     try:
-        image = imread_2D(path) if not request.load_3D else imread_3D(path)
+        image = imread_2D(path)
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     session = SESSIONS.create(image=np.asarray(image), filename=path)
-    return _session_response(session)
+    return session_response(session)
 
 
 @router.post("/io/load-seg", response_model=SessionResponse)
@@ -98,10 +96,10 @@ def load_seg(request: LoadSegRequest) -> SessionResponse:
     if not os.path.isfile(path):
         raise HTTPException(status_code=404, detail=f"File not found: {path}")
     try:
-        session = _load_cellpose_session(path, request.load_3D)
+        session = _load_cellpose_session(path)
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return _session_response(session)
+    return session_response(session)
 
 
 @router.post("/io/save-seg")

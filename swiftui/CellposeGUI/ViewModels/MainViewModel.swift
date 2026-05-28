@@ -256,10 +256,6 @@ final class MainViewModel {
         copy.percentileHigh = segmentationParams.percentileHigh
         copy.niter = segmentationParams.niter
         copy.minSize = segmentationParams.minSize
-        copy.stitchThreshold = segmentationParams.stitchThreshold
-        copy.anisotropy = segmentationParams.anisotropy
-        copy.flow3DSmooth = segmentationParams.flow3DSmooth
-        copy.do3D = segmentationParams.do3D
         return copy
     }
 

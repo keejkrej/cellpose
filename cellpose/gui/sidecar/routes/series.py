@@ -8,7 +8,7 @@ from fastapi import APIRouter, HTTPException
 
 from cellpose.gui import series
 
-from ..routes.segment import _session_response
+from ..session_response import session_response
 from ..schemas import SeriesDiscoverRequest, SeriesNavigateRequest, SessionResponse
 from ..session import SESSIONS
 
@@ -71,4 +71,4 @@ def navigate(request: SeriesNavigateRequest) -> SessionResponse:
         "record_index": request.record_index,
         "metadata": series.build_series_metadata(dataset, request.record_index),
     }
-    return _session_response(new_session)
+    return session_response(new_session)

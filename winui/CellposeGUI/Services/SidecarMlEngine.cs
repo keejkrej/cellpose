@@ -25,7 +25,6 @@ public sealed class SidecarMlEngine(SidecarClient client) : IMlInferenceEngine
             new
             {
                 path = imagePath,
-                load_3D = false,
                 model_name = modelName,
                 custom_model = customModel,
                 @params = parameters,

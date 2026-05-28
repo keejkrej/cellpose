@@ -9,10 +9,6 @@ struct SegmentationParameters: Codable, Equatable {
     var percentileHigh: Double = 99
     var niter: Int = 0
     var minSize: Int = 15
-    var stitchThreshold: Double = 0
-    var anisotropy: Double = 1
-    var flow3DSmooth: Double = 0
-    var do3D: Bool = false
 
     enum CodingKeys: String, CodingKey {
         case diameter
@@ -22,10 +18,6 @@ struct SegmentationParameters: Codable, Equatable {
         case percentileHigh = "percentile_high"
         case niter
         case minSize = "min_size"
-        case stitchThreshold = "stitch_threshold"
-        case anisotropy
-        case flow3DSmooth = "flow3D_smooth"
-        case do3D = "do_3D"
     }
 
     static func fromValues(
@@ -74,7 +66,6 @@ struct DisplayParameters: Equatable {
 }
 
 struct TrainingParameters: Codable, Equatable {
-    var modelIndex: Int = 0
     var learningRate: Double = 1e-5
     var weightDecay: Double = 0.1
     var nEpochs: Int = 100
@@ -83,7 +74,6 @@ struct TrainingParameters: Codable, Equatable {
     var modelSaveFolder: String = ""
 
     enum CodingKeys: String, CodingKey {
-        case modelIndex = "model_index"
         case learningRate = "learning_rate"
         case weightDecay = "weight_decay"
         case nEpochs = "n_epochs"

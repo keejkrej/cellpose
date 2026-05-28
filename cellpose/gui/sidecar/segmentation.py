@@ -60,6 +60,30 @@ def model_device() -> str:
     return str(model.device)
 
 
+def display_image_from_stack(image: np.ndarray) -> np.ndarray:
+    """Return a grayscale uint8 preview for a 2D image stack."""
+    img = np.asarray(image)
+    if img.ndim == 4:
+        img = img[0]
+    if img.ndim == 3:
+        if img.shape[-1] in (1, 2, 3, 4):
+            channels = img[..., : min(3, img.shape[-1])]
+            img = channels[..., 0] if channels.shape[-1] == 1 else channels.mean(axis=-1)
+        else:
+            img = img[0]
+    if img.ndim != 2:
+        raise ValueError(f"expected 2D image for display, got shape {img.shape}")
+    if img.dtype == np.uint8:
+        return img
+    img = img.astype(np.float32)
+    lo, hi = float(img.min()), float(img.max())
+    if hi > lo + 1e-3:
+        img = (img - lo) / (hi - lo) * 255.0
+    else:
+        img = np.zeros_like(img)
+    return img.astype(np.uint8)
+
+
 def build_normalize_params(
     params: SegmentationParams,
     image_shape: tuple[int, int] | None = None,
@@ -91,23 +115,23 @@ def run_inference(
     )
 
     data = np.squeeze(image.copy())
-    do_3D = params.do_3D and params.stitch_threshold <= 0.0
+    if data.ndim > 3 or (data.ndim == 3 and data.shape[-1] not in (1, 2, 3, 4)):
+        raise ValueError("3D volumes are not supported; load a 2D image")
 
     masks, flows = model.eval(
         data,
         diameter=params.diameter if params.diameter and params.diameter > 0 else None,
         cellprob_threshold=params.cellprob_threshold,
         flow_threshold=params.flow_threshold,
-        do_3D=do_3D,
+        do_3D=False,
         niter=params.niter,
         normalize=normalize_params,
-        stitch_threshold=params.stitch_threshold,
-        anisotropy=params.anisotropy,
-        flow3D_smooth=params.flow3D_smooth,
+        stitch_threshold=0.0,
+        anisotropy=1.0,
+        flow3D_smooth=0.0,
         min_size=params.min_size,
         channel_axis=-1,
         progress=progress,
-        z_axis=0 if data.ndim > 3 else None,
     )[:2]
 
     flows_new: list[np.ndarray] = []
@@ -133,7 +157,7 @@ def run_inference(
 
     masks = renumber_masks(masks)
     masks = normalize_mask_dtype(masks)
-    recompute_masks = not do_3D and params.stitch_threshold <= 0.0
+    recompute_masks = True
     return InferResult(
         masks=masks,
         flows=flows_new,
@@ -154,7 +178,7 @@ def recompute_from_flows(
         dP=dP,
         cellprob=cellprob,
         niter=params.niter,
-        do_3D=params.do_3D,
+        do_3D=False,
         min_size=params.min_size,
         cellprob_threshold=params.cellprob_threshold,
         flow_threshold=params.flow_threshold,

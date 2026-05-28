@@ -8,7 +8,7 @@ import cv2
 import fastremap
 import shutil
 
-from ..io import imread, imread_2D, imread_3D
+from ..io import imread_2D
 from ..models import normalize_default, MODEL_DIR, MODEL_LIST_PATH, get_user_models
 from ..utils import masks_to_outlines
 
@@ -208,34 +208,31 @@ def _load_image_series(parent):
             subfolder_template=subfolder_template,
             filename_template=filename_template,
         )
-        _load_series_item(parent, dataset, 0, load_seg=True, load_3D=parent.load_3D)
+        _load_series_item(parent, dataset, 0, load_seg=True)
     except Exception as e:
         print(f"ERROR: {e}")
         QMessageBox.warning(parent, "Load folder with pattern", str(e))
 
 
-def _load_series_item(parent, dataset, item_index, load_seg=True, load_3D=False):
+def _load_series_item(parent, dataset, item_index, load_seg=True):
     output_filename = series.get_output_filename(dataset, item_index)
     seg_filename = os.path.splitext(output_filename)[0] + "_seg.cellpose"
     if load_seg and os.path.isfile(seg_filename):
-        _load_seg(parent, filename=seg_filename, load_3D=load_3D)
+        _load_seg(parent, filename=seg_filename)
         if parent.model.series_state.dataset is None:
             _set_series_state(parent, dataset=dataset, item_index=item_index)
         title = parent.model.series_state.display_filename or parent.model.filename
         parent.set_window_title(str(title))
         return
 
-    _load_image(parent, filename=output_filename, load_seg=False, load_3D=load_3D)
+    _load_image(parent, filename=output_filename, load_seg=False)
     _set_series_state(parent, dataset=dataset, item_index=item_index)
     title = parent.model.series_state.display_filename or parent.model.filename
     parent.set_window_title(str(title))
 
 
-def _load_image(parent, filename=None, load_seg=True, load_3D=False):
+def _load_image(parent, filename=None, load_seg=True):
     """Load image with filename; if None, open QFileDialog."""
-    if parent.load_3D:
-        load_3D = True
-
     if filename is None:
         name = QFileDialog.getOpenFileName(parent, "Load image")
         filename = name[0]
@@ -244,27 +241,24 @@ def _load_image(parent, filename=None, load_seg=True, load_3D=False):
     _clear_series_state(parent)
     manual_file = os.path.splitext(filename)[0] + "_seg.cellpose"
     if load_seg and os.path.isfile(manual_file):
-        image = imread_2D(filename) if not load_3D else imread_3D(filename)
-        _load_seg(parent, manual_file, image=image, image_file=filename, load_3D=load_3D)
+        image = imread_2D(filename)
+        _load_seg(parent, manual_file, image=image, image_file=filename)
         return
     try:
         print(f"GUI_INFO: loading image: {filename}")
-        if not load_3D:
-            image = imread_2D(filename)
-        else:
-            image = imread_3D(filename)
+        image = imread_2D(filename)
     except Exception as e:
         print("ERROR: images not compatible")
         print(f"ERROR: {e}")
         return
 
     parent.presenter.reset_session()
-    parent.presenter.on_initialize_images(image, load_3d=load_3D)
+    parent.presenter.on_initialize_images(image)
     parent.presenter.on_image_loaded(filename)
 
 
-def _initialize_images(parent, image, load_3D=False):
-    parent.presenter.on_initialize_images(image, load_3d=load_3D)
+def _initialize_images(parent, image):
+    parent.presenter.on_initialize_images(image)
 
 
 def _apply_cellpose_segmentation_widgets(parent, segmentation) -> None:
@@ -284,7 +278,7 @@ def _apply_cellpose_segmentation_widgets(parent, segmentation) -> None:
         parent.min_size = int(segmentation.min_size)
 
 
-def _load_seg(parent, filename, image=None, image_file=None, load_3D=False):
+def _load_seg(parent, filename, image=None, image_file=None):
     """Load a *_seg.cellpose session archive."""
     from cellpose.gui.session_format import read_session
 
@@ -306,7 +300,7 @@ def _load_seg(parent, filename, image=None, image_file=None, load_3D=False):
             return
         try:
             print(f"GUI_INFO: loading image: {image_path}")
-            image = imread_2D(image_path) if not load_3D else imread_3D(image_path)
+            image = imread_2D(image_path)
         except Exception as exc:
             parent.model.session.loaded = False
             print(f"ERROR: cannot load image: {exc}")
@@ -322,7 +316,7 @@ def _load_seg(parent, filename, image=None, image_file=None, load_3D=False):
     parent.model.session.restore = None
     parent.model.session.ratio = 1.0
 
-    parent.presenter.on_initialize_images(image, load_3d=load_3D)
+    parent.presenter.on_initialize_images(image)
 
     masks = np.asarray(session_data.masks)
     if masks.min() == -1:
