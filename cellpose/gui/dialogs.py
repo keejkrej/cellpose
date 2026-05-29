@@ -4,9 +4,8 @@ Dialog views for the Cellpose GUI.
 
 import os
 
-os.environ.setdefault("PYQTGRAPH_QT_LIB", "PySide6")
-from PySide6 import QtCore
-from PySide6.QtWidgets import (
+from .qt import QtCore
+from qtpy.QtWidgets import (
     QAbstractItemView,
     QComboBox,
     QDialog,

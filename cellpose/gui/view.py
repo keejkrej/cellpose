@@ -12,9 +12,8 @@ import pathlib
 
 import numpy as np
 
-os.environ.setdefault("PYQTGRAPH_QT_LIB", "PySide6")
-from PySide6 import QtCore, QtGui
-from PySide6.QtWidgets import (
+from .qt import QtCore, QtGui
+from qtpy.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
     QComboBox,

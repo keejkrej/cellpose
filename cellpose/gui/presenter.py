@@ -14,7 +14,8 @@ from typing import Any
 
 import cv2
 import numpy as np
-from PySide6.QtWidgets import QMessageBox
+from .qt import QtCore  # noqa: F401 — configure QT_API before qtpy
+from qtpy.QtWidgets import QMessageBox
 
 from .. import dynamics, models, train
 from ..io import get_image_files

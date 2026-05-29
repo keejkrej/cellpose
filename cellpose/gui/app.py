@@ -12,9 +12,8 @@ import pathlib
 import sys
 import warnings
 
-os.environ.setdefault("PYQTGRAPH_QT_LIB", "PySide6")
-from PySide6 import QtCore, QtGui
-from PySide6.QtWidgets import QApplication
+from .qt import QtCore, QtGui
+from qtpy.QtWidgets import QApplication
 
 from .. import models
 from ..utils import download_url_to_file

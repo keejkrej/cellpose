@@ -46,7 +46,7 @@ def main():
                 if GUI_IMPORT:
                     print(
                         "GUI FAILED: GUI dependencies may not be installed."
-                        " Install with: uv sync  (requires pyside6, pyqtgraph)"
+                        " Install with: uv sync  (requires qtpy, pyqtgraph, and a Qt binding such as pyside6)"
                     )
             else:
                 gui_run()

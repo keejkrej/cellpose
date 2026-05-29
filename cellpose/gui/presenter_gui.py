@@ -14,8 +14,8 @@ from typing import Any
 
 import cv2
 import numpy as np
-from PySide6 import QtCore, QtGui
-from PySide6.QtWidgets import (
+from .qt import QtCore, QtGui
+from qtpy.QtWidgets import (
     QAbstractItemView,
     QDialog,
     QDialogButtonBox,

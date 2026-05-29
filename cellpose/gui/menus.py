@@ -1,7 +1,8 @@
 """
 Copyright © 2025 Howard Hughes Medical Institute, Authored by Carsen Stringer , Michael Rariden and Marius Pachitariu.
 """
-from PySide6.QtGui import QAction
+from .qt import QtCore  # noqa: F401 — configure QT_API before qtpy
+from qtpy.QtGui import QAction
 
 
 def mainmenu(view, presenter):

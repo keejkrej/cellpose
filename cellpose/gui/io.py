@@ -15,7 +15,8 @@ from ..models import MODEL_DIR, MODEL_LIST_PATH, get_user_models, normalize_defa
 from . import series
 
 try:
-    from PySide6.QtWidgets import (
+    from .qt import QtCore  # noqa: F401 — configure QT_API before qtpy widgets
+    from qtpy.QtWidgets import (
         QDialog,
         QDialogButtonBox,
         QFormLayout,
