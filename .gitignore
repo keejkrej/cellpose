@@ -132,6 +132,10 @@ dmypy.json
 **/xcuserdata/
 *.xcuserstate
 
+# Swift Package Manager
+**/.build/
+**/.swiftpm/
+
 # .NET / WinUI build output
 winui/**/bin/
 winui/**/obj/
