@@ -422,9 +422,19 @@ class MainView(QMainWindow):
             roi_item = QTableWidgetItem(str(row.roi))
             roi_item.setFlags(roi_item.flags() & ~QtCore.Qt.ItemFlag.ItemIsEditable)
             class_item = QTableWidgetItem(str(row.class_id))
+            major_item = QTableWidgetItem(
+                "" if row.major_diameter is None else f"{row.major_diameter:.1f}"
+            )
+            major_item.setFlags(major_item.flags() & ~QtCore.Qt.ItemFlag.ItemIsEditable)
+            minor_item = QTableWidgetItem(
+                "" if row.minor_diameter is None else f"{row.minor_diameter:.1f}"
+            )
+            minor_item.setFlags(minor_item.flags() & ~QtCore.Qt.ItemFlag.ItemIsEditable)
             self.LabelsTable.setItem(row_index, 0, visible_item)
             self.LabelsTable.setItem(row_index, 1, roi_item)
             self.LabelsTable.setItem(row_index, 2, class_item)
+            self.LabelsTable.setItem(row_index, 3, major_item)
+            self.LabelsTable.setItem(row_index, 4, minor_item)
             self.LabelsTable.setRowHidden(row_index, row.hidden_by_filter)
         self.LabelsTable.blockSignals(False)
         selected_cells = [row.roi for row in rows if row.selected]
@@ -624,15 +634,19 @@ class MainView(QMainWindow):
         labels_filter_layout.addWidget(self.LabelsClassFilter)
         self.labels_box_v.addLayout(labels_filter_layout)
 
-        self.LabelsTable = QTableWidget(0, 3)
+        self.LabelsTable = QTableWidget(0, 5)
         visibility_header = CheckBoxHeader(QtCore.Qt.Orientation.Horizontal, self.LabelsTable)
         self.LabelsTable.setHorizontalHeader(visibility_header)
-        self.LabelsTable.setHorizontalHeaderLabels(["", "ROI", "Class ID"])
+        self.LabelsTable.setHorizontalHeaderLabels(
+            ["", "ROI", "Class ID", "Major diam.", "Minor diam."]
+        )
         self._visibility_header = visibility_header
         self.LabelsTable.horizontalHeader().setSectionResizeMode(0, QHeaderView.Fixed)
         self.LabelsTable.setColumnWidth(0, 32)
         self.LabelsTable.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
         self.LabelsTable.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
+        self.LabelsTable.horizontalHeader().setSectionResizeMode(3, QHeaderView.Stretch)
+        self.LabelsTable.horizontalHeader().setSectionResizeMode(4, QHeaderView.Stretch)
         self.LabelsTable.verticalHeader().setVisible(False)
         self.LabelsTable.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.LabelsTable.setSelectionMode(QAbstractItemView.ExtendedSelection)

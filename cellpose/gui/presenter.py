@@ -22,6 +22,7 @@ from ..io import get_image_files
 from ..models import normalize_default
 from ..plot import disk
 from ..transforms import normalize99, resize_image
+from ..utils import get_mask_ellipse_diameters
 from . import io, series
 from .model import InstanceClasses, MainModel, SegmentationParameters, SeriesState
 from .presenter_gui import PresenterGuiMixin
@@ -210,13 +211,29 @@ class MainPresenter(PresenterGuiMixin):
         selected = set(self.model.selection.selected_cells)
         if not selected and self.model.selection.selected > 0:
             selected = {self.model.selection.selected}
+        major_diameters = minor_diameters = None
+        if ncells > 0:
+            plane = self.session.cellpix[self.session.current_z]
+            major_diameters, minor_diameters = get_mask_ellipse_diameters(plane)
         rows = []
         for row in range(ncells):
             class_id = int(self.instance_classes[row])
+            major = (
+                None
+                if major_diameters is None or np.isnan(major_diameters[row])
+                else float(major_diameters[row])
+            )
+            minor = (
+                None
+                if minor_diameters is None or np.isnan(minor_diameters[row])
+                else float(minor_diameters[row])
+            )
             rows.append(
                 LabelRow(
                     roi=row + 1,
                     class_id=class_id,
+                    major_diameter=major,
+                    minor_diameter=minor,
                     visible=bool(self.instance_visible[row]),
                     hidden_by_filter=(
                         filter_class_id is not None and class_id != filter_class_id

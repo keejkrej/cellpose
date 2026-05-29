@@ -39,6 +39,10 @@ public sealed class LabelRowViewModel : INotifyPropertyChanged
         set => _viewModel.SetInstanceClass(_row, (int)value);
     }
 
+    public string MajorDiameterLabel => _viewModel.FormatMajorDiameter(_row);
+
+    public string MinorDiameterLabel => _viewModel.FormatMinorDiameter(_row);
+
     public bool IsHiddenByFilter
     {
         get

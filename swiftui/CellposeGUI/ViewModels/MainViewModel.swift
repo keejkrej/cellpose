@@ -37,6 +37,7 @@ final class MainViewModel {
     var selectedLabelRows: Set<Int> = []
     var selectionRevision = 0
     var labelsRowsRevision = 0
+    var ellipseDiameters: [MaskMetricsService.EllipseDiameters] = []
     var showEditClassDialog = false
     var editClassInitialValue: Int32 = 0
     var inStroke = false
@@ -86,6 +87,7 @@ final class MainViewModel {
         self.image = image
         masks = nil
         ncells = 0
+        ellipseDiameters = []
         recomputeMasks = false
         selectedCell = 0
         setCellSelection([])
@@ -111,6 +113,7 @@ final class MainViewModel {
         ncells = loaded.masks.labels.isEmpty ? 0 : Int(loaded.masks.labels.max() ?? 0)
         recomputeMasks = loaded.recomputeMasks
         instanceClasses.replace(ncells: ncells)
+        refreshEllipseDiameters()
         setCellSelection([])
         progress = 1
         imageLoaded = true
@@ -128,7 +131,35 @@ final class MainViewModel {
         session.masks = colored
         masks = colored
         ncells = newNcells
+        refreshEllipseDiameters()
         labelsRowsRevision += 1
+    }
+
+    func refreshEllipseDiameters() {
+        guard let masks, ncells > 0 else {
+            ellipseDiameters = []
+            return
+        }
+        ellipseDiameters = MaskMetricsService.ellipseDiameters(
+            labels: masks.labels,
+            width: masks.width,
+            height: masks.height,
+            ncells: ncells
+        )
+    }
+
+    func formattedMajorDiameter(row: Int) -> String {
+        guard row >= 0, row < ellipseDiameters.count else { return "" }
+        let value = ellipseDiameters[row].major
+        guard value.isFinite else { return "" }
+        return String(format: "%.1f", value)
+    }
+
+    func formattedMinorDiameter(row: Int) -> String {
+        guard row >= 0, row < ellipseDiameters.count else { return "" }
+        let value = ellipseDiameters[row].minor
+        guard value.isFinite else { return "" }
+        return String(format: "%.1f", value)
     }
 
     func isCellSelected(_ label: Int32) -> Bool {

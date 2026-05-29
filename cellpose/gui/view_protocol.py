@@ -21,6 +21,8 @@ class LabelRow:
 
     roi: int
     class_id: int
+    major_diameter: float | None
+    minor_diameter: float | None
     visible: bool
     hidden_by_filter: bool
     selected: bool

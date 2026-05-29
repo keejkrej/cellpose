@@ -404,6 +404,65 @@ def get_mask_perimeters(masks):
     return perimeters
 
 
+def get_mask_ellipse_diameters(masks):
+    """
+    Major and minor diameters from an equivalent ellipse fit to each mask.
+
+    Uses the covariance of mask pixel coordinates (same convention as
+    skimage regionprops major/minor_axis_length).
+
+    Parameters:
+        masks (ndarray): masks (0=no cells, 1=first cell, 2=second cell,...)
+
+    Returns:
+        tuple: (major_diameters, minor_diameters) arrays indexed by cell-1.
+    """
+    n = int(masks.max())
+    major = np.full(n, np.nan, dtype=np.float64)
+    minor = np.full(n, np.nan, dtype=np.float64)
+    for ic in range(n):
+        coords = np.column_stack(np.nonzero(masks == (ic + 1))).astype(np.float64)
+        if coords.shape[0] < 5:
+            continue
+        cov = np.cov(coords.T, bias=True)
+        eigvals = np.linalg.eigvalsh(cov)
+        eigvals = np.maximum(eigvals, 0.0)
+        axes = 4.0 * np.sqrt(eigvals)
+        major[ic] = float(np.max(axes))
+        minor[ic] = float(np.min(axes))
+    return major, minor
+
+
+def get_mask_pixel_cv(masks, image):
+    """
+    Coefficient of variation (std / mean) of image intensity inside each mask.
+
+    Parameters:
+        masks (ndarray): masks (0=no cells, 1=first cell, 2=second cell,...)
+        image (ndarray): 2D image or multichannel image aligned with masks.
+
+    Returns:
+        ndarray: per-cell CV indexed by cell-1.
+    """
+    img = np.asarray(image)
+    if img.ndim > 2:
+        img = img.astype(np.float64).mean(axis=-1)
+    else:
+        img = img.astype(np.float64)
+
+    n = int(masks.max())
+    cv = np.full(n, np.nan, dtype=np.float64)
+    for ic in range(n):
+        values = img[masks == (ic + 1)]
+        if values.size < 2:
+            continue
+        mean = float(values.mean())
+        if mean <= 0:
+            continue
+        cv[ic] = float(np.std(values, ddof=0) / mean)
+    return cv
+
+
 def circleMask(d0):
     """
     Creates an array with indices which are the radius of that x,y point.

@@ -365,6 +365,33 @@ public sealed class MainViewModel : ObservableObject
 
     public int LabelsRowsRevision { get; private set; }
 
+    private EllipseDiameters[] _ellipseDiameters = [];
+
+    public string FormatMajorDiameter(int row) =>
+        FormatEllipseDiameter(row, static d => d.Major);
+
+    public string FormatMinorDiameter(int row) =>
+        FormatEllipseDiameter(row, static d => d.Minor);
+
+    private string FormatEllipseDiameter(int row, Func<EllipseDiameters, double> selector)
+    {
+        if (row < 0 || row >= _ellipseDiameters.Length)
+            return "";
+        var value = selector(_ellipseDiameters[row]);
+        return double.IsFinite(value) ? value.ToString("0.0") : "";
+    }
+
+    private void RefreshEllipseDiameters()
+    {
+        if (_masks == null || _ncells <= 0)
+        {
+            _ellipseDiameters = [];
+            return;
+        }
+
+        _ellipseDiameters = MaskMetricsService.EllipseDiameters(_masks, _ncells);
+    }
+
     public void ApplyLoadedImage(string path, ImageData image)
     {
         if (!_dispatcher.HasThreadAccess)
@@ -388,6 +415,7 @@ public sealed class MainViewModel : ObservableObject
         SetCellSelection([]);
         InstanceClasses.Replace(0);
         InstanceVisibility.Replace(0);
+        _ellipseDiameters = [];
         Progress = 1;
         ImageLoaded = true;
         UpdateSaturationFromImage();
@@ -462,6 +490,7 @@ public sealed class MainViewModel : ObservableObject
         _session.Masks = masks;
         Masks = masks;
         Ncells = ncells;
+        RefreshEllipseDiameters();
         LabelsRowsRevision++;
         Notify(nameof(LabelsRowsRevision));
         Notify(nameof(FilteredCellCount));

@@ -99,7 +99,7 @@
                         PlaceholderText="all"
                         HorizontalAlignment="Stretch"
                         Text="{x:Bind ViewModel.ClassFilterText, Mode=TwoWay}" />
-                    <Grid Padding="4,0,8,0" ColumnDefinitions="52,60,*">
+                    <Grid Padding="4,0,8,0" ColumnDefinitions="52,60,*,72,72">
                         <CheckBox
                             Grid.Column="0"
                             Style="{StaticResource LabelsVisibilityCheckBoxStyle}"
@@ -115,6 +115,16 @@
                             VerticalAlignment="Center"
                             FontWeight="SemiBold"
                             Text="Class ID" />
+                        <TextBlock
+                            Grid.Column="3"
+                            VerticalAlignment="Center"
+                            FontWeight="SemiBold"
+                            Text="Major diam." />
+                        <TextBlock
+                            Grid.Column="4"
+                            VerticalAlignment="Center"
+                            FontWeight="SemiBold"
+                            Text="Minor diam." />
                     </Grid>
                     <controls:DataGrid
                         x:Name="LabelsGrid"
@@ -157,6 +167,14 @@
                                     </DataTemplate>
                                 </controls:DataGridTemplateColumn.CellTemplate>
                             </controls:DataGridTemplateColumn>
+                            <controls:DataGridTextColumn
+                                Width="72"
+                                Binding="{Binding MajorDiameterLabel}"
+                                IsReadOnly="True" />
+                            <controls:DataGridTextColumn
+                                Width="72"
+                                Binding="{Binding MinorDiameterLabel}"
+                                IsReadOnly="True" />
                         </controls:DataGrid.Columns>
                     </controls:DataGrid>
                 </StackPanel>

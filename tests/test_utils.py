@@ -1,5 +1,9 @@
 import numpy as np
-from cellpose.utils import fill_holes_and_remove_small_masks
+from cellpose.utils import (
+    fill_holes_and_remove_small_masks,
+    get_mask_ellipse_diameters,
+    get_mask_pixel_cv,
+)
 import fastremap
 
 
@@ -21,3 +25,34 @@ def test_fill_holes_and_remove_small_masks():
     gt_masks = fastremap.renumber(masks[0], in_place=False)[0]
 
     assert (gt_masks == masks_cleaned).all()
+
+
+def test_get_mask_ellipse_diameters():
+    masks = np.zeros((40, 60), dtype=np.uint16)
+    masks[10:30, 15:45] = 1
+    major, minor = get_mask_ellipse_diameters(masks)
+    assert major.shape == (1,)
+    assert minor.shape == (1,)
+    assert major[0] > minor[0]
+    assert major[0] > 15
+    assert minor[0] > 5
+
+    empty_major, empty_minor = get_mask_ellipse_diameters(np.zeros((10, 10), dtype=np.uint16))
+    assert empty_major.shape == (0,)
+    assert empty_minor.shape == (0,)
+
+
+def test_get_mask_pixel_cv():
+    image = np.zeros((40, 60), dtype=np.float64)
+    image[10:30, 15:45] = 10.0
+    image[20:25, 25:35] = 30.0
+    masks = np.zeros((40, 60), dtype=np.uint16)
+    masks[10:30, 15:45] = 1
+
+    cv = get_mask_pixel_cv(masks, image)
+    assert cv.shape == (1,)
+    assert cv[0] > 0
+
+    uniform = np.full((40, 60), 5.0, dtype=np.float64)
+    uniform_cv = get_mask_pixel_cv(masks, uniform)
+    assert uniform_cv[0] == 0.0

@@ -84,7 +84,9 @@ struct LabelsTableView: View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
                 Text("ROI").frame(width: 60, alignment: .leading).font(.caption.bold())
-                Text("Class ID").font(.caption.bold())
+                Text("Class ID").frame(width: 60, alignment: .leading).font(.caption.bold())
+                Text("Major diam.").frame(width: 72, alignment: .leading).font(.caption.bold())
+                Text("Minor diam.").font(.caption.bold())
             }
             if viewModel.ncells == 0 {
                 Text("")
@@ -109,6 +111,11 @@ struct LabelsTableView: View {
                             format: .number
                         )
                         .frame(width: 60)
+                        Text(viewModel.formattedMajorDiameter(row: row))
+                            .frame(width: 72, alignment: .leading)
+                            .foregroundStyle(.secondary)
+                        Text(viewModel.formattedMinorDiameter(row: row))
+                            .foregroundStyle(.secondary)
                     }
                 }
                 .frame(minHeight: 120)

@@ -27,6 +27,7 @@
 		A10000000000000000000012 /* CellposeSessionStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000015 /* CellposeSessionStore.swift */; };
 		A10000000000000000000013 /* MaskEditService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000016 /* MaskEditService.swift */; };
 		A10000000000000000000014 /* SeriesDiscoveryService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000017 /* SeriesDiscoveryService.swift */; };
+		A10000000000000000000015 /* MaskMetricsService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000023 /* MaskMetricsService.swift */; };
 		A10000000000000000000017 /* SessionState.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000020 /* SessionState.swift */; };
 		A10000000000000000000019 /* RuntimeEnvironment.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000022 /* RuntimeEnvironment.swift */; };
 		C10000000000000000000001 /* CellposeGUICore in Frameworks */ = {isa = PBXBuildFile; productRef = C20000000000000000000001 /* CellposeGUICore */; };
@@ -58,6 +59,7 @@
 		A20000000000000000000017 /* SeriesDiscoveryService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SeriesDiscoveryService.swift; sourceTree = "<group>"; };
 		A20000000000000000000020 /* SessionState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionState.swift; sourceTree = "<group>"; };
 		A20000000000000000000022 /* RuntimeEnvironment.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RuntimeEnvironment.swift; sourceTree = "<group>"; };
+		A20000000000000000000023 /* MaskMetricsService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MaskMetricsService.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -140,6 +142,7 @@
 				A20000000000000000000014 /* ImageLoaderService.swift */,
 				A20000000000000000000015 /* CellposeSessionStore.swift */,
 				A20000000000000000000016 /* MaskEditService.swift */,
+				A20000000000000000000023 /* MaskMetricsService.swift */,
 				A20000000000000000000017 /* SeriesDiscoveryService.swift */,
 				A20000000000000000000022 /* RuntimeEnvironment.swift */,
 			);
@@ -268,6 +271,7 @@
 				A10000000000000000000011 /* ImageLoaderService.swift in Sources */,
 				A10000000000000000000012 /* CellposeSessionStore.swift in Sources */,
 				A10000000000000000000013 /* MaskEditService.swift in Sources */,
+				A10000000000000000000015 /* MaskMetricsService.swift in Sources */,
 				A10000000000000000000014 /* SeriesDiscoveryService.swift in Sources */,
 				A10000000000000000000017 /* SessionState.swift in Sources */,
 				A10000000000000000000019 /* RuntimeEnvironment.swift in Sources */,
