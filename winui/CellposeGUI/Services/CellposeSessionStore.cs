@@ -1,24 +1,11 @@
-using System.Buffers.Binary;
-using System.IO.Compression;
-using System.Text;
-using System.Text.Json;
-using System.Text.Json.Serialization;
 using CellposeGUI.Models;
 
 namespace CellposeGUI.Services;
 
 public sealed class CellposeSessionStore
 {
-    private static readonly UTF8Encoding Utf8NoBom = new(encoderShouldEmitUTF8Identifier: false);
-    private static readonly JsonSerializerOptions JsonOptions = new()
-    {
-        PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
-        PropertyNameCaseInsensitive = true,
-        WriteIndented = true,
-    };
-
     public string DefaultPath(string imagePath) =>
-        Path.ChangeExtension(imagePath, null) + "_seg.cellpose";
+        Path.ChangeExtension(imagePath, null) + "_seg.npy";
 
     public void Save(string path, SessionState session)
     {
@@ -29,271 +16,149 @@ public sealed class CellposeSessionStore
         if (!string.IsNullOrEmpty(directory))
             Directory.CreateDirectory(directory);
 
-        if (File.Exists(path))
-            File.Delete(path);
+        var masks = session.Masks;
+        var colors = MaskEditService.EnsureColors(masks, masks.Colors);
+        var outlines = masks.OutlineLabels ?? MaskEditService.ComputeOutlineLabels(
+            masks.Labels,
+            masks.Width,
+            masks.Height);
 
-        using var archive = ZipFile.Open(path, ZipArchiveMode.Create);
-        var arrays = new Dictionary<string, ManifestArray>();
-        WriteUInt16Array(archive, arrays, "masks", session.Masks);
-
-        for (var i = 0; i < session.Flows.Count; i++)
-            WriteRawArray(archive, arrays, $"flows_{i}", session.Flows[i]);
-
-        var colors = MaskEditService.EnsureColors(session.Masks, session.Masks.Colors);
-        WriteColorArray(archive, arrays, colors);
-
-        var manifest = new SessionManifest
+        var payload = new Dictionary<string, object?>
         {
-            Version = 1,
-            SourceImage = session.ImagePath,
-            Segmentation = session.Segmentation,
-            Model = session.Model,
-            RecomputeMasks = session.RecomputeMasks,
-            Arrays = arrays,
+            ["outlines"] = SegNpyIO.FromLabels(outlines, masks.Width, masks.Height),
+            ["masks"] = SegNpyIO.FromLabels(masks.Labels, masks.Width, masks.Height),
+            ["colors"] = SegNpyIO.FromColors(colors),
+            ["filename"] = session.ImagePath,
+            ["flows"] = session.Flows.Select(SegNpyIO.FromArrayPayload).Cast<object?>().ToList(),
+            ["flow_threshold"] = session.Segmentation.FlowThreshold,
+            ["cellprob_threshold"] = session.Segmentation.CellprobThreshold,
+            ["diameter"] = session.Segmentation.Diameter > 0 ? session.Segmentation.Diameter : null,
+            ["model_path"] = session.Model is "cpsam" or "0" ? 0 : session.Model,
+            ["restore"] = null,
+            ["ratio"] = 1.0,
         };
 
-        var manifestEntry = archive.CreateEntry("manifest.json", CompressionLevel.Optimal);
-        using (var stream = manifestEntry.Open())
-        using (var writer = new StreamWriter(stream, Utf8NoBom))
-            writer.Write(JsonSerializer.Serialize(manifest, JsonOptions));
+        SegNpyIO.Write(path, payload);
     }
 
     public LoadedSession Load(string path, ImageLoaderService imageLoader)
     {
-        using var archive = ZipFile.OpenRead(path);
-        var manifest = ReadManifest(archive, path);
-        var sourceImage = ResolveSourceImage(manifest.SourceImage, path);
+        var payload = SegNpyIO.Read(path);
+        var sourceImage = ResolveSourceImage(GetString(payload, "filename"), path);
         if (!File.Exists(sourceImage))
             throw new SidecarException($"Source image not found: {sourceImage}");
 
-        var maskData = ReadMaskData(archive, manifest);
-        var flows = ReadFlows(archive, manifest);
-        return new LoadedSession
-        {
-            ImagePath = sourceImage,
-            Image = imageLoader.Load(sourceImage),
-            Masks = maskData,
-            Flows = flows,
-            RecomputeMasks = manifest.RecomputeMasks,
-            Model = manifest.Model,
-            Segmentation = manifest.Segmentation,
-        };
+        return BuildLoadedSession(payload, sourceImage, imageLoader.Load(sourceImage));
     }
 
     public LoadedSession LoadCompanion(string sessionPath, string imagePath, ImageData image)
     {
-        using var archive = ZipFile.OpenRead(sessionPath);
-        var manifest = ReadManifest(archive, sessionPath);
-        var maskData = ReadMaskData(archive, manifest);
-        if (maskData.Width != image.Width || maskData.Height != image.Height)
+        var payload = SegNpyIO.Read(sessionPath);
+        var loaded = BuildLoadedSession(payload, imagePath, image);
+        if (loaded.Masks.Width != image.Width || loaded.Masks.Height != image.Height)
         {
             throw new SidecarException(
-                $"Session mask size {maskData.Width}x{maskData.Height} does not match image {image.Width}x{image.Height}");
+                $"Session mask size {loaded.Masks.Width}x{loaded.Masks.Height} does not match image {image.Width}x{image.Height}");
         }
 
+        return loaded;
+    }
+
+    private static LoadedSession BuildLoadedSession(
+        Dictionary<string, object?> payload,
+        string imagePath,
+        ImageData image)
+    {
+        if (payload.GetValueOrDefault("masks") is not SegNpyArray masksArray)
+            throw new SidecarException("Invalid _seg.npy file: missing masks");
+
+        var (labels, width, height) = ReadLabelMatrix(masksArray);
+        var colors = payload.GetValueOrDefault("colors") is SegNpyArray colorsArray
+            ? SegNpyIO.ReadColors(colorsArray)
+            : MaskEditService.DefaultColors(labels.Length == 0 ? 0 : labels.Max());
+
+        var outlines = payload.GetValueOrDefault("outlines") is SegNpyArray outlinesArray
+            ? SegNpyIO.ReadLabels(outlinesArray)
+            : MaskEditService.ComputeOutlineLabels(labels, width, height);
+
+        var flows = new List<ArrayPayload>();
+        if (payload.GetValueOrDefault("flows") is List<object?> flowItems)
+        {
+            foreach (var item in flowItems)
+            {
+                if (item is SegNpyArray flowArray)
+                    flows.Add(SegNpyIO.ToArrayPayload(flowArray));
+            }
+        }
+
+        var diameter = payload.GetValueOrDefault("diameter");
         return new LoadedSession
         {
             ImagePath = imagePath,
             Image = image,
-            Masks = maskData,
-            Flows = ReadFlows(archive, manifest),
-            RecomputeMasks = manifest.RecomputeMasks,
-            Model = manifest.Model,
-            Segmentation = manifest.Segmentation,
+            Masks = new MaskData
+            {
+                Width = width,
+                Height = height,
+                Labels = labels,
+                Colors = colors,
+                OutlineLabels = outlines,
+            },
+            Flows = flows,
+            RecomputeMasks = flows.Count > 0,
+            Model = FormatModel(payload.GetValueOrDefault("model_path")),
+            Segmentation = new SegmentationParameters
+            {
+                FlowThreshold = GetDouble(payload, "flow_threshold", 0.4),
+                CellprobThreshold = GetDouble(payload, "cellprob_threshold", 0.0),
+                Diameter = diameter is double d ? d : 0,
+                Niter = 200,
+                MinSize = 15,
+            },
         };
     }
 
-    private static SessionManifest ReadManifest(ZipArchive archive, string sessionPath)
+    private static (int[] Labels, int Width, int Height) ReadLabelMatrix(SegNpyArray array)
     {
-        var manifestEntry = archive.GetEntry("manifest.json")
-            ?? throw new SidecarException("Invalid session file: missing manifest.json");
-
-        using var stream = manifestEntry.Open();
-        var manifest = JsonSerializer.Deserialize<SessionManifest>(stream, JsonOptions)
-                       ?? throw new SidecarException("Invalid session manifest");
-        if (manifest.Version != 1)
-            throw new SidecarException($"Unsupported session version: {manifest.Version}");
-        return manifest;
+        var labels = SegNpyIO.ReadLabels(array);
+        if (array.Shape.Length == 2)
+            return (labels, array.Shape[1], array.Shape[0]);
+        if (array.Shape.Length == 3 && array.Shape[0] == 1)
+            return (labels, array.Shape[2], array.Shape[1]);
+        throw new SidecarException("Invalid mask shape in _seg.npy");
     }
 
     private static string ResolveSourceImage(string sourceImage, string sessionPath)
     {
         if (Path.IsPathRooted(sourceImage))
             return sourceImage;
-
         return Path.GetFullPath(Path.Combine(Path.GetDirectoryName(sessionPath)!, sourceImage));
     }
 
-    private static MaskData ReadMaskData(ZipArchive archive, SessionManifest manifest)
-    {
-        if (!manifest.Arrays.TryGetValue("masks", out var masksEntry))
-            throw new SidecarException("Invalid session file: missing masks array");
+    private static string GetString(Dictionary<string, object?> payload, string key) =>
+        payload.GetValueOrDefault(key)?.ToString() ?? "";
 
-        var labels = ReadMaskLabels(archive, masksEntry);
-        var ncells = labels.Length == 0 ? 0 : labels.Max();
-        byte[][] colors = manifest.Arrays.TryGetValue("colors", out var colorsEntry)
-            ? ReadColors(archive, colorsEntry)
-            : MaskEditService.DefaultColors(ncells);
-
-        var width = masksEntry.Shape[^1];
-        var height = masksEntry.Shape[^2];
-        return new MaskData
+    private static double GetDouble(Dictionary<string, object?> payload, string key, double fallback) =>
+        payload.GetValueOrDefault(key) switch
         {
-            Width = width,
-            Height = height,
-            Labels = labels,
-            Colors = colors,
-            OutlineLabels = MaskEditService.ComputeOutlineLabels(labels, width, height),
+            double value => value,
+            long value => value,
+            int value => value,
+            _ => fallback,
         };
-    }
 
-    private static List<ArrayPayload> ReadFlows(ZipArchive archive, SessionManifest manifest)
-    {
-        var flows = new List<ArrayPayload>();
-        for (var i = 0; ; i++)
+    private static string FormatModel(object? value) =>
+        value switch
         {
-            if (!manifest.Arrays.TryGetValue($"flows_{i}", out var flowEntry))
-                break;
-            flows.Add(ReadPayload(archive, flowEntry));
-        }
-
-        return flows;
-    }
-
-    private static void WriteUInt16Array(
-        ZipArchive archive,
-        Dictionary<string, ManifestArray> arrays,
-        string name,
-        MaskData masks)
-    {
-        var raw = new byte[masks.Labels.Length * sizeof(ushort)];
-        var span = raw.AsSpan();
-        for (var i = 0; i < masks.Labels.Length; i++)
-        {
-            var value = (ushort)Math.Clamp(masks.Labels[i], 0, ushort.MaxValue);
-            BinaryPrimitives.WriteUInt16LittleEndian(span[(i * sizeof(ushort))..], value);
-        }
-
-        var relPath = $"arrays/{name}.uint16";
-        var entry = archive.CreateEntry(relPath, CompressionLevel.Optimal);
-        using (var stream = entry.Open())
-            stream.Write(raw);
-
-        arrays[name] = new ManifestArray
-        {
-            File = relPath,
-            Dtype = "uint16",
-            Shape = [masks.Height, masks.Width],
+            null => "cpsam",
+            0 => "cpsam",
+            0L => "cpsam",
+            long l when l == 0 => "cpsam",
+            int i when i == 0 => "cpsam",
+            string s when s is "0" or "" => "cpsam",
+            string s => s,
+            _ => value.ToString() ?? "cpsam",
         };
-    }
-
-    private static void WriteRawArray(
-        ZipArchive archive,
-        Dictionary<string, ManifestArray> arrays,
-        string name,
-        ArrayPayload payload)
-    {
-        var relPath = $"arrays/{name}.{PayloadExtension(payload.Dtype)}";
-        var raw = ArrayCodec.Decode(payload);
-        var entry = archive.CreateEntry(relPath, CompressionLevel.Optimal);
-        using (var stream = entry.Open())
-            stream.Write(raw);
-
-        arrays[name] = new ManifestArray
-        {
-            File = relPath,
-            Dtype = payload.Dtype,
-            Shape = payload.Shape,
-        };
-    }
-
-    private static void WriteColorArray(
-        ZipArchive archive,
-        Dictionary<string, ManifestArray> arrays,
-        byte[][] colors)
-    {
-        var raw = new byte[colors.Length * 3];
-        for (var i = 0; i < colors.Length; i++)
-        {
-            raw[i * 3] = colors[i][0];
-            raw[i * 3 + 1] = colors[i][1];
-            raw[i * 3 + 2] = colors[i][2];
-        }
-
-        var relPath = "arrays/colors.uint8";
-        var entry = archive.CreateEntry(relPath, CompressionLevel.Optimal);
-        using (var stream = entry.Open())
-            stream.Write(raw);
-
-        arrays["colors"] = new ManifestArray
-        {
-            File = relPath,
-            Dtype = "uint8",
-            Shape = [colors.Length, 3],
-        };
-    }
-
-    private static int[] ReadMaskLabels(ZipArchive archive, ManifestArray entry)
-    {
-        var raw = ReadRaw(archive, entry);
-        var labels = new int[raw.Length / sizeof(ushort)];
-        for (var i = 0; i < labels.Length; i++)
-            labels[i] = BinaryPrimitives.ReadUInt16LittleEndian(raw.AsSpan(i * sizeof(ushort)));
-        return labels;
-    }
-
-    private static byte[][] ReadColors(ZipArchive archive, ManifestArray entry)
-    {
-        var raw = ReadRaw(archive, entry);
-        var count = entry.Shape[0];
-        var colors = new byte[count][];
-        for (var i = 0; i < count; i++)
-            colors[i] = [raw[i * 3], raw[i * 3 + 1], raw[i * 3 + 2]];
-        return colors;
-    }
-
-    private static ArrayPayload ReadPayload(ZipArchive archive, ManifestArray entry)
-    {
-        var raw = ReadRaw(archive, entry);
-        return ArrayCodec.EncodeRaw(raw, entry.Dtype, entry.Shape);
-    }
-
-    private static byte[] ReadRaw(ZipArchive archive, ManifestArray entry)
-    {
-        var zipEntry = archive.GetEntry(entry.File)
-            ?? throw new SidecarException($"Missing array entry: {entry.File}");
-        using var stream = zipEntry.Open();
-        using var memory = new MemoryStream();
-        stream.CopyTo(memory);
-        return memory.ToArray();
-    }
-
-    private static string PayloadExtension(string dtype) => dtype switch
-    {
-        "uint8" => "uint8",
-        "float32" => "float32",
-        "float64" => "float64",
-        _ => dtype,
-    };
-
-    private sealed class SessionManifest
-    {
-        public int Version { get; set; }
-        [JsonPropertyName("source_image")]
-        public string SourceImage { get; set; } = "";
-        public SegmentationParameters Segmentation { get; set; } = new();
-        public string Model { get; set; } = "cpsam";
-        [JsonPropertyName("recompute_masks")]
-        public bool RecomputeMasks { get; set; }
-        public Dictionary<string, ManifestArray> Arrays { get; set; } = new();
-    }
-
-    private sealed class ManifestArray
-    {
-        public string File { get; set; } = "";
-        public string Dtype { get; set; } = "";
-        public int[] Shape { get; set; } = [];
-    }
 }
 
 public sealed class LoadedSession

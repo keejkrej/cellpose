@@ -675,7 +675,7 @@ final class MainViewModel {
 
     func handleDroppedURLs(_ urls: [URL]) async {
         guard let url = urls.first else { return }
-        if url.pathExtension.lowercased() == "cellpose" {
+        if url.pathExtension.lowercased() == "npy", url.lastPathComponent.hasSuffix("_seg.npy") {
             await loadSeg(path: url.path)
         } else {
             await loadImage(path: url.path)

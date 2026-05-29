@@ -141,7 +141,7 @@ class TrainWindow(QDialog):
             return
 
         if not train_files:
-            self._add_train_preview_message("no _seg.cellpose files found")
+            self._add_train_preview_message("no _seg.npy files found")
             return
 
         for i, train_file in enumerate(train_files):

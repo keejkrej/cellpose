@@ -1171,7 +1171,8 @@ public sealed class MainViewModel : ObservableObject
         if (path == null)
             return;
 
-        if (Path.GetExtension(path).Equals(".cellpose", StringComparison.OrdinalIgnoreCase))
+        if (Path.GetExtension(path).Equals(".npy", StringComparison.OrdinalIgnoreCase) &&
+            path.EndsWith("_seg.npy", StringComparison.OrdinalIgnoreCase))
             await LoadSegAsync(path);
         else
             await LoadImageAsync(path);

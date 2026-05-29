@@ -1,4 +1,4 @@
-"""Data models for `.cellpose` session archives."""
+"""Data models for `_seg.npy` session files."""
 
 from __future__ import annotations
 
@@ -7,9 +7,8 @@ from typing import Any
 
 import numpy as np
 
-SESSION_FORMAT_VERSION = 1
-SESSION_EXTENSION = ".cellpose"
-SESSION_SUFFIX = "_seg.cellpose"
+SESSION_EXTENSION = ".npy"
+SESSION_SUFFIX = "_seg.npy"
 
 
 @dataclass

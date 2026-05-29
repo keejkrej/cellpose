@@ -215,7 +215,7 @@ final class SeriesDiscoveryService {
     }
 
     private func isSupportedSeriesFile(_ name: String) -> Bool {
-        if name.lowercased().hasSuffix("_seg.cellpose") { return false }
+        if name.lowercased().hasSuffix("_seg.npy") { return false }
         let ext = URL(fileURLWithPath: name).pathExtension.lowercased()
         return supportedExtensions.contains(ext)
     }

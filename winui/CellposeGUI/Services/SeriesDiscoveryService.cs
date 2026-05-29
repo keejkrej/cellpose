@@ -204,7 +204,7 @@ public sealed class SeriesDiscoveryService
 
     private static bool IsSupportedSeriesFile(string name)
     {
-        if (name.EndsWith("_seg.cellpose", StringComparison.OrdinalIgnoreCase))
+        if (name.EndsWith("_seg.npy", StringComparison.OrdinalIgnoreCase))
             return false;
         return SupportedExtensions.Contains(Path.GetExtension(name).ToLowerInvariant());
     }

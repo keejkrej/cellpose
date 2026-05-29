@@ -47,7 +47,7 @@ def _get_train_set(image_names):
     train_data, train_labels, train_files = [], [], []
     for image_name_full in image_names:
         image_name = os.path.splitext(image_name_full)[0]
-        session_path = image_name + "_seg.cellpose"
+        session_path = image_name + "_seg.npy"
         if not os.path.isfile(session_path):
             continue
         try:

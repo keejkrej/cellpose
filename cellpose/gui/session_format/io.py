@@ -1,69 +1,21 @@
-"""Read and write `.cellpose` zip session archives."""
+"""Read and write pickled `_seg.npy` session files (original Cellpose format)."""
 
 from __future__ import annotations
 
-import json
 import os
-import zipfile
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 
-from .models import SESSION_FORMAT_VERSION, SessionData, SegmentationMetadata
+from cellpose.utils import masks_to_outlines
 
-_ARRAYS_DIR = "arrays"
-_MANIFEST_NAME = "manifest.json"
-
-_DTYPE_MAP = {
-    "uint8": np.uint8,
-    "uint16": np.uint16,
-    "uint32": np.uint32,
-    "int32": np.int32,
-    "float32": np.float32,
-    "float64": np.float64,
-    "bool": np.bool_,
-}
+from .models import SessionData, SegmentationMetadata
 
 
 def default_session_path(image_path: str) -> str:
     base = os.path.splitext(image_path)[0]
-    return base + "_seg.cellpose"
-
-
-def _dtype_from_name(name: str) -> np.dtype:
-    if name not in _DTYPE_MAP:
-        raise ValueError(f"Unsupported dtype: {name}")
-    return np.dtype(_DTYPE_MAP[name])
-
-
-def _dtype_to_name(dtype: np.dtype) -> str:
-    for name, mapped in _DTYPE_MAP.items():
-        if np.dtype(mapped) == dtype:
-            return name
-    raise ValueError(f"Unsupported dtype for session export: {dtype}")
-
-
-def _write_array_entry(
-    zf: zipfile.ZipFile,
-    name: str,
-    arr: np.ndarray,
-) -> dict[str, Any]:
-    arr = np.ascontiguousarray(arr)
-    rel_path = f"{_ARRAYS_DIR}/{name}.{_dtype_to_name(arr.dtype)}"
-    zf.writestr(rel_path, arr.tobytes(), compress_type=zipfile.ZIP_DEFLATED)
-    return {
-        "file": rel_path,
-        "dtype": _dtype_to_name(arr.dtype),
-        "shape": list(arr.shape),
-    }
-
-
-def _read_array_entry(zf: zipfile.ZipFile, entry: dict[str, Any]) -> np.ndarray:
-    raw = zf.read(entry["file"])
-    dtype = _dtype_from_name(entry["dtype"])
-    arr = np.frombuffer(raw, dtype=dtype)
-    return arr.reshape(tuple(entry["shape"]))
+    return base + "_seg.npy"
 
 
 def _default_colors(ncells: int) -> np.ndarray:
@@ -71,91 +23,91 @@ def _default_colors(ncells: int) -> np.ndarray:
     return rng.integers(50, 255, size=(max(ncells, 1), 3), dtype=np.uint8)
 
 
-def write_session(path: str | os.PathLike[str], session: SessionData) -> str:
-    """Write session data to a `.cellpose` zip archive."""
-    path = Path(path)
-    if path.suffix != ".cellpose":
-        path = path.with_suffix(".cellpose")
-
-    arrays: dict[str, dict[str, Any]] = {}
-    with zipfile.ZipFile(path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
-        arrays["masks"] = _write_array_entry(zf, "masks", session.masks.squeeze())
-
-        if session.flows:
-            for index, flow in enumerate(session.flows):
-                arrays[f"flows_{index}"] = _write_array_entry(
-                    zf, f"flows_{index}", flow
-                )
-
-        colors = session.colors
-        if colors is None and session.ncells > 0:
-            colors = _default_colors(session.ncells)
-        if colors is not None:
-            arrays["colors"] = _write_array_entry(zf, "colors", colors)
-
-        if session.instance_classes is not None:
-            arrays["instance_classes"] = _write_array_entry(
-                zf, "instance_classes", session.instance_classes.astype(np.int32)
-            )
-
-        if session.ismanual is not None:
-            arrays["ismanual"] = _write_array_entry(
-                zf, "ismanual", session.ismanual.astype(np.bool_)
-            )
-
-        manifest = {
-            "version": SESSION_FORMAT_VERSION,
-            "source_image": session.source_image,
-            "segmentation": session.segmentation.to_dict(),
-            "model": session.model,
-            "recompute_masks": session.recompute_masks,
-            "arrays": arrays,
-        }
-        zf.writestr(
-            _MANIFEST_NAME,
-            json.dumps(manifest, indent=2),
-            compress_type=zipfile.ZIP_DEFLATED,
-        )
-
-    return str(path)
+def _compute_outlines(masks: np.ndarray) -> np.ndarray:
+    masks = np.asarray(masks).squeeze()
+    return masks * masks_to_outlines(masks)
 
 
-def read_session(path: str | os.PathLike[str]) -> SessionData:
-    """Read session data from a `.cellpose` zip archive."""
-    path = Path(path)
-    with zipfile.ZipFile(path, "r") as zf:
-        manifest = json.loads(zf.read(_MANIFEST_NAME).decode("utf-8-sig"))
-        if manifest.get("version") != SESSION_FORMAT_VERSION:
-            raise ValueError(
-                f"Unsupported session format version: {manifest.get('version')}"
-            )
+def _resolve_source_image(filename: str, session_path: Path) -> str:
+    if os.path.isabs(filename):
+        return filename
+    return str((session_path.parent / filename).resolve())
 
-        arrays = manifest.get("arrays", {})
-        masks = _read_array_entry(zf, arrays["masks"])
 
-        flows: list[np.ndarray] | None = None
-        flow_keys = sorted(
-            (key for key in arrays if key.startswith("flows_")),
-            key=lambda name: int(name.split("_", 1)[1]),
-        )
-        if flow_keys:
-            flows = [_read_array_entry(zf, arrays[key]) for key in flow_keys]
+def session_to_pickle_dict(session: SessionData) -> dict[str, Any]:
+    """Build a legacy `_seg.npy` dict payload from ``SessionData``."""
+    masks = np.ascontiguousarray(np.asarray(session.masks).squeeze())
+    max_value = int(masks.max()) if masks.size else 0
+    dtype = np.uint16 if max_value < 2**16 - 1 else np.uint32
+    masks = masks.astype(dtype, copy=False)
+    outlines = _compute_outlines(masks).astype(dtype, copy=False)
 
-        colors = (
-            _read_array_entry(zf, arrays["colors"]) if "colors" in arrays else None
-        )
-        instance_classes = (
-            _read_array_entry(zf, arrays["instance_classes"])
-            if "instance_classes" in arrays
-            else None
-        )
-        ismanual = (
-            _read_array_entry(zf, arrays["ismanual"]) if "ismanual" in arrays else None
-        )
+    colors = session.colors
+    if colors is None and session.ncells > 0:
+        colors = _default_colors(session.ncells)
+    if colors is not None:
+        colors = np.ascontiguousarray(colors, dtype=np.uint8)
 
-    source_image = manifest["source_image"]
-    if not os.path.isabs(source_image):
-        source_image = str((path.parent / source_image).resolve())
+    dat: dict[str, Any] = {
+        "outlines": outlines,
+        "masks": masks,
+        "filename": session.source_image,
+        "flows": session.flows or [],
+        "flow_threshold": session.segmentation.flow_threshold,
+        "cellprob_threshold": session.segmentation.cellprob_threshold,
+        "diameter": session.segmentation.diameter,
+        "model_path": session.model if session.model not in ("cpsam", "0") else 0,
+        "restore": None,
+        "ratio": 1.0,
+    }
+    if colors is not None:
+        dat["colors"] = colors
+    if session.ismanual is not None and len(session.ismanual):
+        dat["ismanual"] = np.asarray(session.ismanual, dtype=bool)
+    if session.instance_classes is not None and len(session.instance_classes):
+        dat["instance_classes"] = np.asarray(session.instance_classes, dtype=np.int32)
+    return dat
+
+
+def session_from_pickle_dict(dat: dict[str, Any], session_path: Path) -> SessionData:
+    """Convert a legacy `_seg.npy` dict payload to ``SessionData``."""
+    if "outlines" not in dat:
+        raise ValueError("Invalid _seg.npy file: missing outlines")
+
+    masks = np.asarray(dat["masks"]).squeeze()
+    filename = str(dat.get("filename", ""))
+    if filename:
+        source_image = _resolve_source_image(filename, session_path)
+    else:
+        source_image = str(session_path.with_name(session_path.stem.replace("_seg", "")))
+
+    flows = None
+    if "flows" in dat and dat["flows"] is not None:
+        try:
+            flows = [np.asarray(flow) for flow in dat["flows"]]
+        except TypeError:
+            flows = None
+
+    colors = np.asarray(dat["colors"], dtype=np.uint8) if "colors" in dat else None
+    instance_classes = (
+        np.asarray(dat["instance_classes"], dtype=np.int32)
+        if "instance_classes" in dat
+        else None
+    )
+    ismanual = np.asarray(dat["ismanual"], dtype=bool) if "ismanual" in dat else None
+
+    model = dat.get("model_path", dat.get("model", "cpsam"))
+    if model in (0, "0", None):
+        model = "cpsam"
+    else:
+        model = str(model)
+
+    recompute_masks = bool(dat.get("recompute_masks", False))
+    if not recompute_masks and flows:
+        try:
+            recompute_masks = flows[0].shape[-3] == masks.shape[-2]
+        except Exception:
+            recompute_masks = False
 
     return SessionData(
         source_image=source_image,
@@ -164,9 +116,36 @@ def read_session(path: str | os.PathLike[str]) -> SessionData:
         colors=colors,
         instance_classes=instance_classes,
         ismanual=ismanual,
-        model=str(manifest.get("model", "cpsam")),
-        recompute_masks=bool(manifest.get("recompute_masks", False)),
-        segmentation=SegmentationMetadata.from_dict(
-            manifest.get("segmentation", {})
+        model=model,
+        recompute_masks=recompute_masks,
+        segmentation=SegmentationMetadata(
+            flow_threshold=float(dat.get("flow_threshold", 0.4)),
+            cellprob_threshold=float(dat.get("cellprob_threshold", 0.0)),
+            diameter=dat.get("diameter"),
+            niter=int(dat.get("niter", 200)),
+            min_size=int(dat.get("min_size", 15)),
         ),
     )
+
+
+def write_session(path: str | os.PathLike[str], session: SessionData | dict[str, Any]) -> str:
+    """Write session data to a pickled `_seg.npy` file."""
+    path = Path(path)
+    if path.suffix != ".npy":
+        path = path.with_suffix(".npy")
+
+    payload = session if isinstance(session, dict) else session_to_pickle_dict(session)
+    np.save(path, payload)
+    return str(path)
+
+
+def read_session(path: str | os.PathLike[str]) -> SessionData:
+    """Read session data from a pickled `_seg.npy` file."""
+    path = Path(path)
+    loaded = np.load(path, allow_pickle=True)
+    if getattr(loaded, "ndim", None) != 0:
+        raise ValueError("Invalid _seg.npy file: expected pickled dict payload")
+    dat = loaded.item()
+    if not isinstance(dat, dict):
+        raise ValueError("Invalid _seg.npy file: expected pickled dict payload")
+    return session_from_pickle_dict(dat, path)

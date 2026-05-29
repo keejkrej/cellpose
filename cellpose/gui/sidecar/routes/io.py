@@ -1,4 +1,4 @@
-"""I/O routes for images and `.cellpose` session files."""
+"""I/O routes for images and `_seg.npy` session files."""
 
 from __future__ import annotations
 
@@ -118,7 +118,7 @@ def save_seg(request: SaveSegRequest) -> dict:
         filename = default_session_path(session.filename)
     else:
         filename = os.path.expanduser(filename)
-        if not filename.endswith(".cellpose"):
+        if not filename.endswith("_seg.npy"):
             filename = default_session_path(filename)
 
     try:

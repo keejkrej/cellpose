@@ -190,7 +190,7 @@ class PresenterGuiMixin:
                 return
 
         self.reset_series()
-        manual_file = os.path.splitext(filename)[0] + "_seg.cellpose"
+        manual_file = os.path.splitext(filename)[0] + "_seg.npy"
         if load_seg and os.path.isfile(manual_file):
             image = imread_2D(filename)
             self.load_seg(manual_file, image=image, image_file=filename)
@@ -223,7 +223,7 @@ class PresenterGuiMixin:
             session_data = read_session(filename)
         except Exception as exc:
             self.model.session.loaded = False
-            print(f"ERROR: not a valid .cellpose session: {exc}")
+            print(f"ERROR: not a valid _seg.npy session: {exc}")
             return
 
         if image is None:
@@ -338,7 +338,7 @@ class PresenterGuiMixin:
         load_seg: bool = True,
     ) -> None:
         output_filename = series.get_output_filename(dataset, item_index)
-        seg_filename = os.path.splitext(output_filename)[0] + "_seg.cellpose"
+        seg_filename = os.path.splitext(output_filename)[0] + "_seg.npy"
         if load_seg and os.path.isfile(seg_filename):
             self.load_seg(filename=seg_filename)
             if self.model.series_state.dataset is None:
@@ -402,7 +402,7 @@ class PresenterGuiMixin:
     def handle_drop(self, files: list[str]) -> None:
         if not files:
             return
-        if os.path.splitext(files[0])[-1] == ".cellpose":
+        if files[0].endswith("_seg.npy"):
             self.load_seg(filename=files[0])
         else:
             self.load_image(filename=files[0], load_seg=True)

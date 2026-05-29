@@ -858,21 +858,19 @@ class MainPresenter(PresenterGuiMixin):
 
         filename = self.output_filename(str(self.model.filename))
         base = os.path.splitext(filename)[0]
-        path = base + "_seg.cellpose"
+        path = base + "_seg.npy"
         segmentation_params = self.segmentation_parameters_dict()
         normalize_params = self.get_normalize_params()
         self.model.segmentation_params = segmentation_params
         self.model.preprocessing_params = normalize_params
         model_name, _ = self.view.read_selected_model()
-        source_image = str(self.model.filename) if self.model.filename else filename
-        session_data = self.model.to_session_data(
-            source_image=source_image,
-            model=model_name,
+        dat = self.model.to_seg_dict(
+            current_model_path=model_name,
+            normalize_params=normalize_params,
             segmentation_params=segmentation_params,
-            recompute_masks=bool(self.session.recompute_masks),
         )
         try:
-            written = write_session(path, session_data)
+            written = write_session(path, dat)
             print("GUI_INFO: %d ROIs saved to %s" % (self.ncells(), written))
         except Exception as e:
             print(f"ERROR: {e}")
@@ -934,7 +932,7 @@ class MainPresenter(PresenterGuiMixin):
             if len(train_files) == 0:
                 self.view.show_message(
                     "Train",
-                    "No valid training images with _seg.cellpose found in folder.",
+                    "No valid training images with _seg.npy found in folder.",
                 )
                 return
             self.view.logger.info(

@@ -35,7 +35,7 @@ def train(request: TrainRequest) -> dict:
     if len(train_data) == 0:
         raise HTTPException(
             status_code=400,
-            detail="No training data with *_seg.cellpose labels found",
+            detail="No training data with *_seg.npy labels found",
         )
 
     save_folder = request.model_save_folder or str(MODEL_DIR / "custom")
