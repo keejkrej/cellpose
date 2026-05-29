@@ -5,11 +5,13 @@ import Observation
 @Observable
 final class SidecarProcessManager {
     private(set) var isReady = false
+    private(set) var hasFailed = false
     private(set) var statusMessage = "Starting sidecar…"
     private(set) var baseURL: URL
 
     private var process: Process?
     private var repoRoot: URL
+    private var stderrBuffer = ""
 
     init(baseURL: URL? = nil) {
         if let baseURL {
@@ -32,17 +34,62 @@ final class SidecarProcessManager {
         {
             return URL(fileURLWithPath: envRoot, isDirectory: true)
         }
-        let bundleRoot = Bundle.main.bundleURL
-        for candidate in [
-            bundleRoot.deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent(),
-            bundleRoot.deletingLastPathComponent().deletingLastPathComponent(),
+
+        for start in [
+            Bundle.main.bundleURL,
             URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true),
         ] {
-            if FileManager.default.fileExists(atPath: candidate.appendingPathComponent("cellpose").path) {
+            if let root = findRepoRoot(startingAt: start) {
+                return root
+            }
+        }
+
+        return URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
+    }
+
+    private static func findRepoRoot(startingAt url: URL) -> URL? {
+        var current = url.standardizedFileURL
+        let fileManager = FileManager.default
+
+        while !current.path.isEmpty, current.path != "/" {
+            let cellposeDir = current.appendingPathComponent("cellpose")
+            let pyproject = current.appendingPathComponent("pyproject.toml")
+            if fileManager.fileExists(atPath: cellposeDir.path),
+               fileManager.fileExists(atPath: pyproject.path)
+            {
+                return current
+            }
+            current = current.deletingLastPathComponent()
+        }
+
+        return nil
+    }
+
+    private static func findUvExecutable() -> String {
+        let pathEntries = (ProcessInfo.processInfo.environment["PATH"] ?? "")
+            .split(separator: ":", omittingEmptySubsequences: true)
+            .map(String.init)
+
+        for entry in pathEntries {
+            let candidate = URL(fileURLWithPath: entry).appendingPathComponent("uv").path
+            if FileManager.default.isExecutableFile(atPath: candidate) {
                 return candidate
             }
         }
-        return URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
+
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        for candidate in [
+            "/opt/homebrew/bin/uv",
+            "/usr/local/bin/uv",
+            "\(home)/.local/bin/uv",
+            "\(home)/.cargo/bin/uv",
+        ] {
+            if FileManager.default.isExecutableFile(atPath: candidate) {
+                return candidate
+            }
+        }
+
+        return "uv"
     }
 
     func startIfNeeded() async {
@@ -61,11 +108,12 @@ final class SidecarProcessManager {
         guard process == nil else { return }
         statusMessage = "Launching Python sidecar…"
 
+        let uvPath = Self.findUvExecutable()
         let proc = Process()
         proc.currentDirectoryURL = repoRoot
-        proc.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+        proc.executableURL = URL(fileURLWithPath: uvPath)
         proc.arguments = [
-            "uv", "run", "python", "-m", "cellpose.gui.sidecar",
+            "run", "python", "-m", "cellpose.gui.sidecar",
             "--host", "127.0.0.1",
             "--port", "\(baseURL.port ?? 8787)",
         ]
@@ -74,24 +122,55 @@ final class SidecarProcessManager {
         proc.standardOutput = Pipe()
         proc.standardError = stderrPipe
 
+        stderrBuffer = ""
+        stderrPipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
+            let data = handle.availableData
+            guard !data.isEmpty, let text = String(data: data, encoding: .utf8) else { return }
+            Task { @MainActor in
+                self?.stderrBuffer += text
+            }
+        }
+
         do {
             try proc.run()
             process = proc
         } catch {
+            hasFailed = true
             statusMessage = "Failed to launch sidecar: \(error.localizedDescription)"
             return
         }
 
-        for attempt in 0 ..< 60 {
+        // PyTorch + first import can take well over 30s on cold start.
+        for attempt in 0 ..< 180 {
+            if let process, !process.isRunning {
+                let exitCode = process.terminationStatus
+                stderrPipe.fileHandleForReading.readabilityHandler = nil
+                let detail = stderrBuffer.trimmingCharacters(in: .whitespacesAndNewlines)
+                hasFailed = true
+                statusMessage = detail.isEmpty
+                    ? "Sidecar exited with code \(exitCode)."
+                    : "Sidecar failed: \(detail)"
+                self.process = nil
+                return
+            }
+
             if await probeHealth() {
+                stderrPipe.fileHandleForReading.readabilityHandler = nil
                 isReady = true
                 statusMessage = "Sidecar ready"
                 return
             }
-            statusMessage = "Waiting for sidecar (\(attempt + 1)/60)…"
-            try? await Task.sleep(nanoseconds: 500_000_000)
+
+            statusMessage = "Waiting for sidecar (\(attempt + 1)/180)…"
+            try? await Task.sleep(nanoseconds: 1_000_000_000)
         }
-        statusMessage = "Sidecar failed to start"
+
+        stderrPipe.fileHandleForReading.readabilityHandler = nil
+        let detail = stderrBuffer.trimmingCharacters(in: .whitespacesAndNewlines)
+        hasFailed = true
+        statusMessage = detail.isEmpty
+            ? "Sidecar failed to start. Run `uv run python -m cellpose.gui.sidecar` manually to see errors."
+            : "Sidecar failed to start: \(detail)"
     }
 
     func stop() {

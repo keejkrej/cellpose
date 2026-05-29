@@ -13,9 +13,20 @@ struct CellposeGUIApp: App {
                         .focusedSceneValue(\.mainViewModel, viewModel)
                 } else {
                     VStack(spacing: 12) {
-                        ProgressView()
+                        if !sidecarManager.hasFailed {
+                            ProgressView()
+                        }
                         Text(sidecarManager.statusMessage)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(sidecarManager.hasFailed ? .primary : .secondary)
+                            .multilineTextAlignment(.center)
+                            .frame(maxWidth: 480)
+                        if sidecarManager.hasFailed {
+                            Text("Set CELLPOSE_ROOT to your repo path, or run `task run:swiftui` from the repo root.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .multilineTextAlignment(.center)
+                                .frame(maxWidth: 480)
+                        }
                     }
                     .frame(minWidth: 900, minHeight: 600)
                 }

@@ -1,0 +1,147 @@
+version: "3"
+
+vars:
+  ROOT: "{{.TASKFILE_DIR}}"
+  SWIFTUI_DIR: "{{.ROOT}}/swiftui"
+  SWIFTUI_DERIVED: "{{.SWIFTUI_DIR}}/.build"
+  SWIFTUI_APP: "{{.SWIFTUI_DERIVED}}/Build/Products/Debug/CellposeGUI.app"
+  WINUI_PROJECT: "{{.ROOT}}/winui/CellposeGUI/CellposeGUI.csproj"
+  WINUI_CORE: "{{.ROOT}}/winui/CellposeGUI.Core/CellposeGUI.Core.csproj"
+  WINUI_TESTS: "{{.ROOT}}/winui/CellposeGUI.Tests/CellposeGUI.Tests.csproj"
+
+env:
+  CELLPOSE_ROOT: "{{.ROOT}}"
+
+tasks:
+  default:
+    desc: List available commands
+    cmds:
+      - task --list-all
+    silent: true
+
+  check:
+    desc: Quick compile check for all three (like tsc --noEmit)
+    deps:
+      - check:python
+      - check:swiftui
+      - check:winui
+
+  check:python:
+    desc: Compile-check Python sources
+    preconditions:
+      - sh: command -v uv
+        msg: "error: uv not found"
+    cmds:
+      - uv run python -m compileall -q cellpose
+
+  check:swiftui:
+    desc: Compile-check the macOS SwiftUI app
+    platforms: [darwin]
+    preconditions:
+      - sh: command -v xcodebuild
+        msg: "error: xcodebuild not found; install Xcode"
+    cmds:
+      - >-
+        xcodebuild
+        -project "{{.SWIFTUI_DIR}}/CellposeGUI.xcodeproj"
+        -scheme CellposeGUI
+        -configuration Debug
+        -derivedDataPath "{{.SWIFTUI_DERIVED}}"
+        build
+        -quiet
+
+  check:winui:
+    desc: Compile-check WinUI (full app on Windows; Core+Tests elsewhere)
+    deps:
+      - check:winui:app
+      - check:winui:core
+
+  check:winui:app:
+    internal: true
+    platforms: [windows]
+    preconditions:
+      - sh: command -v dotnet
+        msg: "error: dotnet not found"
+    cmds:
+      - dotnet build "{{.WINUI_PROJECT}}"
+
+  check:winui:core:
+    internal: true
+    platforms: [linux, darwin]
+    cmds:
+      - echo "WinUI app requires Windows; checking CellposeGUI.Core and tests instead."
+      - dotnet build "{{.WINUI_CORE}}"
+      - dotnet build "{{.WINUI_TESTS}}"
+
+  build:
+    desc: Build distributable artifacts
+    deps: [build:python]
+
+  build:python:
+    desc: Build Python wheel and sdist (dist/)
+    preconditions:
+      - sh: command -v uv
+        msg: "error: uv not found"
+    cmds:
+      - uv build
+
+  run:swiftui:
+    desc: Compile-check and run the macOS SwiftUI app
+    deps: [check:swiftui]
+    platforms: [darwin]
+    cmds:
+      - echo "Launching CellposeGUI..."
+      - "{{.SWIFTUI_APP}}/Contents/MacOS/CellposeGUI"
+    interactive: true
+
+  run:winui:
+    desc: Run the WinUI app (Windows only)
+    platforms: [windows]
+    preconditions:
+      - sh: command -v dotnet
+        msg: "error: dotnet not found"
+    cmds:
+      - dotnet run --project "{{.WINUI_PROJECT}}"
+
+  run:qt:
+    desc: Run the Qt GUI (Python)
+    preconditions:
+      - sh: command -v uv
+        msg: "error: uv not found"
+    cmds:
+      - uv run cellpose
+
+  run:sidecar:
+    desc: Start the Python sidecar server
+    preconditions:
+      - sh: command -v uv
+        msg: "error: uv not found"
+    cmds:
+      - uv run python -m cellpose.gui.sidecar
+
+  test:
+    desc: Run all tests
+    deps:
+      - test:python
+      - test:swiftui
+      - test:winui
+
+  test:swiftui:
+    desc: Run Swift package tests
+    platforms: [darwin]
+    dir: "{{.SWIFTUI_DIR}}/CellposeGUICore"
+    cmds:
+      - swift test
+
+  test:winui:
+    desc: Run WinUI tests
+    cmds:
+      - dotnet test "{{.WINUI_TESTS}}"
+
+  test:python:
+    desc: Run Python tests
+    preconditions:
+      - sh: command -v uv
+        msg: "error: uv not found"
+    cmds:
+      - uv run pytest
