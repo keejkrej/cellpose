@@ -20,7 +20,7 @@ install_deps = [
 image_deps = ['nd2', 'pynrrd']
 
 gui_deps = [
-    'pyqtgraph>=0.12.4', "pyqt6", "pyqt6.sip", 'qtpy', 'superqt',
+    'pyqtgraph>=0.12.4', "pyside6", 'qtpy', 'superqt',
 ]
 
 docs_deps = [
@@ -58,22 +58,19 @@ except:
 
 try:
     import PyQt6
-    gui_deps.remove("pyqt6")
-    gui_deps.remove("pyqt6.sip")
+    gui_deps.remove("pyside6")
 except:
     pass
 
 try:
     import PySide2
-    gui_deps.remove("pyqt6")
-    gui_deps.remove("pyqt6.sip")
+    gui_deps.remove("pyside6")
 except:
     pass
 
 try:
     import PySide6
-    gui_deps.remove("pyqt6")
-    gui_deps.remove("pyqt6.sip")
+    gui_deps.remove("pyside6")
 except:
     pass
 
