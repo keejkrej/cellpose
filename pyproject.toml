@@ -1,49 +1,134 @@
 [build-system]
-requires = ["hatchling", "hatch-vcs"]
+requires = ["hatchling==1.27.0", "hatch-vcs>=0.4", "pathspec<0.12"]
 build-backend = "hatchling.build"
 
 [project]
 name = "cellpose"
-version = "4.1.1"
+dynamic = ["version"]
+description = "Anatomical segmentation algorithm"
+readme = "README.md"
 requires-python = ">=3.12"
+license = { file = "LICENSE" }
+authors = [
+  { name = "Marius Pachitariu" },
+  { name = "Carsen Stringer", email = "stringerc@janelia.hhmi.org" },
+]
+keywords = ["cellpose", "segmentation", "microscopy", "image-analysis"]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Science/Research",
+  "License :: OSI Approved :: BSD License",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Scientific/Engineering :: Image Processing",
+]
 dependencies = [
-    "numpy",
-    "scipy",
-    "natsort",
-    "tifffile",
-    "tqdm",
-    "torch",
-    "torchvision",
-    "opencv-python-headless",
-    "fastremap",
-    "imagecodecs",
-    "roifile",
-    "fill-voids",
-    "segment_anything",
-    "pyqtgraph",
-    "pyside6",
-    "dask",
-    "distributed",
-    "dask_image",
-    "pyyaml",
-    "zarr",
-    "dask_jobqueue",
-    "bokeh",
-    "pyarrow",
-    "nd2",
-    "pynrrd",
-    "bioimageio.core",
-    "fastapi",
-    "uvicorn",
-    "python-multipart",
-    "pydantic",
+  "numpy>=1.20.0",
+  "scipy",
+  "natsort",
+  "tifffile",
+  "tqdm",
+  "torch>=1.6",
+  "torchvision",
+  "opencv-python-headless",
+  "fastremap",
+  "imagecodecs",
+  "roifile",
+  "fill-voids",
+  "segment_anything",
+  "pyqtgraph>=0.12.4",
+  "pyside6",
+  "dask",
+  "distributed",
+  "dask_image",
+  "pyyaml",
+  "zarr",
+  "dask_jobqueue",
+  "bokeh",
+  "pyarrow",
+  "nd2",
+  "pynrrd",
+  "bioimageio.core",
+  "fastapi",
+  "uvicorn",
+  "python-multipart",
+  "pydantic",
+]
+
+[project.optional-dependencies]
+gui = []
+docs = [
+  "sphinx>=3.0",
+  "sphinxcontrib-apidoc",
+  "sphinx_rtd_theme",
+  "sphinx-argparse",
+]
+image = [
+  "nd2",
+  "pynrrd",
+]
+distributed = [
+  "dask",
+  "distributed",
+  "dask_image",
+  "pyyaml",
+  "zarr",
+  "dask_jobqueue",
+  "bokeh",
+  "pyarrow",
+]
+bioimageio = [
+  "bioimageio.core",
+]
+all = [
+  "sphinx>=3.0",
+  "sphinxcontrib-apidoc",
+  "sphinx_rtd_theme",
+  "sphinx-argparse",
+  "nd2",
+  "pynrrd",
+  "dask",
+  "distributed",
+  "dask_image",
+  "pyyaml",
+  "zarr",
+  "dask_jobqueue",
+  "bokeh",
+  "pyarrow",
+  "bioimageio.core",
 ]
 
 [project.scripts]
 cellpose = "cellpose.__main__:main"
 
+[project.urls]
+Homepage = "https://github.com/MouseLand/cellpose"
+Documentation = "https://cellpose.readthedocs.io/"
+Repository = "https://github.com/MouseLand/cellpose"
+Issues = "https://github.com/MouseLand/cellpose/issues"
+
 [dependency-groups]
 dev = ["pytest"]
+
+[tool.hatch.version]
+source = "vcs"
+
+[tool.hatch.build.targets.wheel]
+only-include = ["cellpose"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+  "/cellpose",
+  "/tests",
+  "/README.md",
+  "/LICENSE",
+  "/conftest.py",
+  "/imagej_roi_converter.py",
+  "/tox.ini",
+]
 
 [[tool.uv.index]]
 name = "pytorch"
