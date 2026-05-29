@@ -1,3 +1,4 @@
+import CellposeGUICore
 import Foundation
 
 final class SeriesDiscoveryService {
@@ -34,21 +35,19 @@ final class SeriesDiscoveryService {
         }
 
         matches.sort { lhs, rhs in
-            let left = (
-                sortRank(lhs.position),
-                sortRank(lhs.time),
-                sortRank(lhs.channel),
-                sortRank(lhs.z),
-                lhs.relativePath
-            )
-            let right = (
-                sortRank(rhs.position),
-                sortRank(rhs.time),
-                sortRank(rhs.channel),
-                sortRank(rhs.z),
-                rhs.relativePath
-            )
-            return left < right
+            if compareRank(lhs.position, rhs.position) != .orderedSame {
+                return compareRank(lhs.position, rhs.position) == .orderedAscending
+            }
+            if compareRank(lhs.time, rhs.time) != .orderedSame {
+                return compareRank(lhs.time, rhs.time) == .orderedAscending
+            }
+            if compareRank(lhs.channel, rhs.channel) != .orderedSame {
+                return compareRank(lhs.channel, rhs.channel) == .orderedAscending
+            }
+            if compareRank(lhs.z, rhs.z) != .orderedSame {
+                return compareRank(lhs.z, rhs.z) == .orderedAscending
+            }
+            return lhs.relativePath < rhs.relativePath
         }
 
         var lookup: [String: Int] = [:]
@@ -87,8 +86,8 @@ final class SeriesDiscoveryService {
         return SeriesDiscovery(
             folder: folder,
             recordCount: records.count,
-            axes: axes,
             records: records,
+            axes: axes,
             dataset: SeriesDatasetPayload(
                 folder: folder,
                 subfolderTemplate: subfolderTemplate,
@@ -110,6 +109,18 @@ final class SeriesDiscoveryService {
             return (0, String(format: "%010d", number))
         }
         return (1, value)
+    }
+
+    private func compareRank(_ lhs: String, _ rhs: String) -> ComparisonResult {
+        let left = sortRank(lhs)
+        let right = sortRank(rhs)
+        if left.0 != right.0 {
+            return left.0 < right.0 ? .orderedAscending : .orderedDescending
+        }
+        if left.1 == right.1 {
+            return .orderedSame
+        }
+        return left.1 < right.1 ? .orderedAscending : .orderedDescending
     }
 
     private func collectMatches(folder: String, subfolderTemplate: String, filenameTemplate: String) -> [SeriesMatch] {

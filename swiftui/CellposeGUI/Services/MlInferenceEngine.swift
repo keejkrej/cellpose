@@ -1,3 +1,4 @@
+import CellposeGUICore
 import Compression
 import Foundation
 
@@ -175,4 +176,39 @@ struct InferResponsePayload: Decodable {
 struct RecomputeResponsePayload: Decodable {
     let masks: ArrayPayload?
     let ncells: Int
+}
+
+struct StubMlEngine: MlInferenceEngine {
+    func health() async throws -> SidecarHealth {
+        SidecarHealth(status: "ok", version: "stub", modelLoaded: false, device: nil)
+    }
+
+    func listModels() async throws -> SidecarModels {
+        SidecarModels(builtin: ["cpsam"], custom: [])
+    }
+
+    func infer(
+        imagePath: String,
+        modelName: String?,
+        customModel: Bool,
+        params: SegmentationParameters
+    ) async throws -> InferResult {
+        throw SidecarError.notReady
+    }
+
+    func recompute(flows: [ArrayPayload], params: SegmentationParameters) async throws -> RecomputeResult {
+        throw SidecarError.notReady
+    }
+
+    func train(params: TrainingParameters) async throws -> TrainResult {
+        throw SidecarError.notReady
+    }
+
+    func addModel(path: String) async throws -> String {
+        throw SidecarError.notReady
+    }
+
+    func removeModel(name: String) async throws {
+        throw SidecarError.notReady
+    }
 }

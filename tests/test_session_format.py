@@ -2,12 +2,22 @@
 
 from __future__ import annotations
 
-import tempfile
+from pathlib import Path
 
 import numpy as np
+import pytest
 
 from cellpose.gui.session_format import SessionData, read_session, write_session
 from cellpose.gui.session_format.io import default_session_path, session_to_pickle_dict
+
+FIXTURES = Path(__file__).resolve().parent / "fixtures" / "seg_npy"
+
+
+@pytest.fixture()
+def seg_fixtures():
+    if not FIXTURES.is_dir():
+        pytest.skip("Run scripts/generate_seg_fixtures.py to create fixtures")
+    return FIXTURES
 
 
 def test_roundtrip(tmp_path):
@@ -76,3 +86,34 @@ def test_write_matches_original_format(tmp_path):
     assert "outlines" in loaded
     assert "masks" in loaded
     assert np.array_equal(loaded["masks"], session_to_pickle_dict(session)["masks"])
+
+
+@pytest.mark.parametrize(
+    ("fixture_name", "expected_ncells", "expected_source"),
+    [
+        ("minimal_seg.npy", 2, "image.tif"),
+        ("legacy_gui_seg.npy", 2, "legacy_image.tif"),
+        ("with_instance_classes_seg.npy", 2, "image.tif"),
+    ],
+)
+def test_read_committed_fixtures(
+    seg_fixtures, fixture_name, expected_ncells, expected_source
+):
+    path = seg_fixtures / fixture_name
+    assert path.is_file(), f"missing fixture: {path}"
+    loaded = read_session(path)
+    assert loaded.ncells == expected_ncells
+    assert loaded.source_image.endswith(expected_source)
+    assert loaded.masks.squeeze().max() == expected_ncells
+
+
+def test_minimal_fixture_has_flows(seg_fixtures):
+    loaded = read_session(seg_fixtures / "minimal_seg.npy")
+    assert loaded.flows is not None
+    assert len(loaded.flows) == 2
+
+
+def test_instance_classes_fixture(seg_fixtures):
+    loaded = read_session(seg_fixtures / "with_instance_classes_seg.npy")
+    assert loaded.instance_classes is not None
+    assert np.array_equal(loaded.instance_classes, np.array([1, 2], dtype=np.int32))

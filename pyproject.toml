@@ -42,6 +42,9 @@ dependencies = [
 [project.scripts]
 cellpose = "cellpose.__main__:main"
 
+[dependency-groups]
+dev = ["pytest"]
+
 [[tool.uv.index]]
 name = "pytorch"
 url = "https://download.pytorch.org/whl/cu130"

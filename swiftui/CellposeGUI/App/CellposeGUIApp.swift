@@ -21,6 +21,10 @@ struct CellposeGUIApp: App {
                 }
             }
             .task {
+                if RuntimeEnvironment.skipSidecar {
+                    viewModel = MainViewModel(ml: StubMlEngine())
+                    return
+                }
                 await sidecarManager.startIfNeeded()
                 if viewModel == nil, sidecarManager.isReady {
                     let ml = SidecarMlEngine(

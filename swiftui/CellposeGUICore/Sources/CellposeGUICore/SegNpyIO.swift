@@ -1,23 +1,23 @@
 import Foundation
 
-struct SegNpyArray {
-    let descr: String
-    let shape: [Int]
-    let data: Data
+public struct SegNpyArray {
+    public let descr: String
+    public let shape: [Int]
+    public let data: Data
 }
 
-enum SegNpyIO {
-    static func read(path: String) throws -> [String: Any] {
+public enum SegNpyIO {
+    public static func read(path: String) throws -> [String: Any] {
         let pickle = try extractPicklePayload(Data(contentsOf: URL(fileURLWithPath: path)))
         return try PickleReader.readDict(pickle)
     }
 
-    static func write(path: String, payload: [String: Any]) throws {
+    public static func write(path: String, payload: [String: Any]) throws {
         let pickle = PickleWriter.writeDict(payload)
         try writeNpyObjectFile(path: path, pickle: pickle)
     }
 
-    static func readLabels(_ array: SegNpyArray) throws -> [Int32] {
+    public static func readLabels(_ array: SegNpyArray) throws -> [Int32] {
         let count = elementCount(array.shape)
         var labels = [Int32]()
         labels.reserveCapacity(count)
@@ -25,17 +25,25 @@ enum SegNpyIO {
         if descr == "u2" {
             array.data.withUnsafeBytes { buffer in
                 let values = buffer.bindMemory(to: UInt16.self)
-                for value in values {
-                    labels.append(Int32(value))
+                for index in 0 ..< values.count {
+                    labels.append(Int32(values[index]))
                 }
             }
             return labels
         }
         if descr == "u4" {
             array.data.withUnsafeBytes { buffer in
-                let values = buffer.bindMemory(to: UInt32.self)
-                for value in values {
+                for offset in stride(from: 0, to: buffer.count, by: 4) {
+                    let value = buffer.load(fromByteOffset: offset, as: UInt32.self)
                     labels.append(Int32(value))
+                }
+            }
+            return labels
+        }
+        if descr == "i4" {
+            array.data.withUnsafeBytes { buffer in
+                for offset in stride(from: 0, to: buffer.count, by: 4) {
+                    labels.append(buffer.load(fromByteOffset: offset, as: Int32.self))
                 }
             }
             return labels
@@ -43,20 +51,22 @@ enum SegNpyIO {
         throw SidecarError.serverError("Unsupported mask dtype: \(array.descr)")
     }
 
-    static func readColors(_ array: SegNpyArray) -> [[UInt8]] {
+    public static func readColors(_ array: SegNpyArray) -> [[UInt8]] {
         guard array.shape.count == 2, array.shape[1] == 3 else { return [] }
         let count = array.shape[0]
+        let rowBytes = 3
+        guard array.data.count >= count * rowBytes else { return [] }
         return (0 ..< count).map { row in
-            let offset = row * 3
+            let offset = row * rowBytes
             return [array.data[offset], array.data[offset + 1], array.data[offset + 2]]
         }
     }
 
-    static func toArrayPayload(_ array: SegNpyArray) throws -> ArrayPayload {
+    public static func toArrayPayload(_ array: SegNpyArray) throws -> ArrayPayload {
         try ArrayCodec.encodeRaw(array.data, dtype: descrToPayloadDtype(array.descr), shape: array.shape)
     }
 
-    static func fromLabels(_ labels: [Int32], width: Int, height: Int) -> SegNpyArray {
+    public static func fromLabels(_ labels: [Int32], width: Int, height: Int) -> SegNpyArray {
         var raw = Data(capacity: labels.count * MemoryLayout<UInt16>.size)
         for label in labels {
             var value = UInt16(clamping: Int(label)).littleEndian
@@ -65,7 +75,7 @@ enum SegNpyIO {
         return SegNpyArray(descr: "u2", shape: [height, width], data: raw)
     }
 
-    static func fromColors(_ colors: [[UInt8]]) -> SegNpyArray {
+    public static func fromColors(_ colors: [[UInt8]]) -> SegNpyArray {
         var raw = Data(capacity: colors.count * 3)
         for color in colors {
             raw.append(contentsOf: color.prefix(3))
@@ -73,7 +83,7 @@ enum SegNpyIO {
         return SegNpyArray(descr: "u1", shape: [colors.count, 3], data: raw)
     }
 
-    static func fromArrayPayload(_ payload: ArrayPayload) throws -> SegNpyArray {
+    public static func fromArrayPayload(_ payload: ArrayPayload) throws -> SegNpyArray {
         SegNpyArray(
             descr: payloadDtypeToDescr(payload.dtype),
             shape: payload.shape,
@@ -88,11 +98,11 @@ enum SegNpyIO {
         guard let headerEnd = file.firstIndex(of: 0x0A), headerEnd >= 8 else {
             throw SidecarError.serverError("Invalid _seg.npy file: malformed header")
         }
-        let header = String(decoding: file[..<headerEnd], as: ASCII.self)
+        let header = String(decoding: file[..<headerEnd], as: UTF8.self)
         guard header.contains("|O") else {
             throw SidecarError.serverError("Invalid _seg.npy file: expected pickled object array")
         }
-        return file[(headerEnd + 1)...]
+        return Data(file[(headerEnd + 1)...])
     }
 
     private static func writeNpyObjectFile(path: String, pickle: Data) throws {
@@ -151,6 +161,21 @@ enum SegNpyIO {
         func finish() -> SegNpyArray {
             SegNpyArray(descr: descr, shape: shape, data: data)
         }
+
+        func tryFinish() -> SegNpyArray {
+            if descr.isEmpty, !data.isEmpty, !shape.isEmpty {
+                let count = elementCount(shape)
+                if count > 0 {
+                    switch data.count / count {
+                    case 1: descr = "u1"
+                    case 2: descr = "u2"
+                    case 4: descr = "i4"
+                    default: break
+                    }
+                }
+            }
+            return finish()
+        }
     }
 
     private enum PickleReader {
@@ -160,7 +185,28 @@ enum SegNpyIO {
             guard let dict = reader.segDict else {
                 throw SidecarError.serverError("Invalid _seg.npy file: missing segmentation dict")
             }
-            return dict
+            return finalizePayload(dict)
+        }
+
+        private static func finalizePayload(_ dict: [String: Any]) -> [String: Any] {
+            var finalized = dict
+            for key in dict.keys {
+                finalized[key] = finalizeValue(dict[key])
+            }
+            return finalized
+        }
+
+        private static func finalizeValue(_ value: Any?) -> Any? {
+            if let builder = value as? NumpyArrayBuilder {
+                return builder.tryFinish()
+            }
+            if var list = value as? [Any] {
+                for index in list.indices {
+                    list[index] = finalizeValue(list[index]) as Any
+                }
+                return list
+            }
+            return value
         }
 
         private struct Reader {
@@ -203,6 +249,8 @@ enum SegNpyIO {
                     stack.append("\(module).\(name)")
                 case UInt8(ascii: "h"):
                     stack.append(memo[Int(readByte())])
+                case UInt8(ascii: "j"):
+                    stack.append(memo[Int(readInt32())])
                 case UInt8(ascii: "K"):
                     stack.append(Int64(readByte()))
                 case UInt8(ascii: "J"):
@@ -232,9 +280,11 @@ enum SegNpyIO {
                     stack.append(popMark())
                 case UInt8(ascii: "R"):
                     let args = stack.removeLast()
-                    let func = stack.removeLast() as! String
-                    if func.contains("ndarray") || func.contains("_reconstruct") {
+                    let callable = stack.removeLast() as! String
+                    if callable.contains("ndarray") || callable.contains("_reconstruct") {
                         stack.append(NumpyArrayBuilder())
+                    } else if callable.contains("dtype") {
+                        stack.append(args)
                     } else {
                         stack.append(args)
                     }
@@ -267,8 +317,19 @@ enum SegNpyIO {
                     }
                     list.append(contentsOf: items)
                     stack[stack.count - 1] = list
+                case UInt8(ascii: "a"):
+                    let value = stack.removeLast()
+                    guard var list = stack.last as? [Any] else {
+                        throw SidecarError.serverError("Invalid _seg.npy pickle list")
+                    }
+                    list.append(value)
+                    stack[stack.count - 1] = list
                 case UInt8(ascii: "C"):
                     stack.append(readShortBytes())
+                case UInt8(ascii: "B"):
+                    stack.append(readBinBytes())
+                case 0x29:
+                    stack.append([Any]())
                 default:
                     throw SidecarError.serverError(String(format: "Unsupported pickle opcode 0x%02X", op))
                 }
@@ -276,45 +337,67 @@ enum SegNpyIO {
 
             mutating func applyBuild(target: Any, state: Any) -> Any {
                 if var builder = target as? NumpyArrayBuilder {
-                    if let bytes = state as? Data {
-                        builder.data = bytes
+                    collectArrayState(&builder, state: state)
+                    if !builder.data.isEmpty, !builder.shape.isEmpty, isSupportedDescr(builder.descr) {
                         return builder.finish()
-                    }
-                    if let tuple = state as? [Any] {
-                        if let raw = tuple.last as? Data {
-                            builder.data = raw
-                            return builder.finish()
-                        }
-                        for item in tuple {
-                            if let shape = item as? [Any], shape.allSatisfy({ $0 is Int64 || $0 is Int }) {
-                                builder.shape = shape.map { value in
-                                    if let intValue = value as? Int { return intValue }
-                                    if let int64Value = value as? Int64 { return Int(int64Value) }
-                                    return 0
-                                }
-                            } else if let descr = item as? String, ["u1", "u2", "u4", "i4", "f4", "f8", "b1"].contains(descr) {
-                                builder.descr = descr
-                            }
-                        }
                     }
                     return builder
                 }
                 return state
             }
 
+            mutating func collectArrayState(_ builder: inout NumpyArrayBuilder, state: Any) {
+                if let bytes = state as? Data, !bytes.isEmpty {
+                    builder.data = bytes
+                    return
+                }
+                if let text = state as? String, isSupportedDescr(text) {
+                    builder.descr = normalizeDescr(text)
+                    return
+                }
+                if let items = state as? [Any] {
+                    if !items.isEmpty, items.allSatisfy({ $0 is Int64 || $0 is Int }) {
+                        let shape = items.map { value -> Int in
+                            if let intValue = value as? Int { return intValue }
+                            if let int64Value = value as? Int64 { return Int(int64Value) }
+                            return 0
+                        }
+                        if shape.count > 1 || (shape.count == 1 && shape[0] != 1) {
+                            builder.shape = shape
+                        }
+                    }
+                    for item in items {
+                        collectArrayState(&builder, state: item)
+                    }
+                }
+            }
+
+            func isSupportedDescr(_ descr: String) -> Bool {
+                let normalized = normalizeDescr(descr)
+                return ["u1", "u2", "u4", "i4", "f4", "f8", "b1"].contains(normalized)
+            }
+
             mutating func popMark() -> [Any] {
+                guard !marks.isEmpty else { return [] }
                 let start = marks.removeLast()
+                guard start <= stack.count else { return [] }
                 let items = Array(stack[start...])
                 stack.removeSubrange(start...)
                 return items
             }
 
             mutating func readByte() -> UInt8 {
+                guard index < data.count else {
+                    return 0
+                }
                 defer { index += 1 }
                 return data[index]
             }
 
             mutating func readBytes(_ count: Int) -> Data {
+                guard index + count <= data.count else {
+                    return Data()
+                }
                 defer { index += count }
                 return data[index ..< index + count]
             }
@@ -328,12 +411,19 @@ enum SegNpyIO {
                 readBytes(Int(readByte()))
             }
 
+            mutating func readBinBytes() -> Data {
+                let length = Int(readInt32())
+                return readBytes(length)
+            }
+
             mutating func readInt32() -> Int32 {
-                readBytes(4).withUnsafeBytes { $0.load(as: Int32.self) }
+                let bytes = readBytes(4)
+                return bytes.withUnsafeBytes { $0.loadUnaligned(as: Int32.self) }
             }
 
             mutating func readFloat64() -> Double {
-                readBytes(8).withUnsafeBytes { $0.load(as: Double.self) }
+                let bytes = readBytes(8)
+                return bytes.withUnsafeBytes { $0.loadUnaligned(as: Double.self) }
             }
 
             mutating func readLine() -> String {
@@ -341,7 +431,7 @@ enum SegNpyIO {
                 while index < data.count, data[index] != 0x0A {
                     index += 1
                 }
-                let text = String(decoding: data[start ..< index], as: ASCII.self)
+                let text = String(decoding: data[start ..< index], as: UTF8.self)
                 if index < data.count { index += 1 }
                 return text
             }
@@ -513,11 +603,5 @@ enum SegNpyIO {
                 data.append(contentsOf: bytes)
             }
         }
-    }
-}
-
-private extension Array where Element == Any {
-    func allSatisfy(_ predicate: (Any) -> Bool) -> Bool {
-        !contains { !predicate($0) }
     }
 }

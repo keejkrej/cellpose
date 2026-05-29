@@ -46,6 +46,12 @@ final class SidecarProcessManager {
     }
 
     func startIfNeeded() async {
+        if RuntimeEnvironment.skipSidecar {
+            isReady = true
+            statusMessage = "Sidecar skipped"
+            return
+        }
+
         if await probeHealth() {
             isReady = true
             statusMessage = "Sidecar ready"

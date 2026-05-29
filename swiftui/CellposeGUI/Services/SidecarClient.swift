@@ -1,3 +1,4 @@
+import CellposeGUICore
 import Foundation
 
 final class SidecarClient: Sendable {

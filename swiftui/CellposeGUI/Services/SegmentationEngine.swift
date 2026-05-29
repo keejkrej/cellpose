@@ -1,3 +1,4 @@
+import CellposeGUICore
 import Foundation
 
 struct SidecarHealth: Codable {
@@ -66,34 +67,5 @@ struct TrainResult: Codable {
     enum CodingKeys: String, CodingKey {
         case modelPath = "model_path"
         case modelName = "model_name"
-    }
-}
-
-struct ArrayPayload: Codable {
-    let dtype: String
-    let shape: [Int]
-    let dataB64: String
-
-    enum CodingKeys: String, CodingKey {
-        case dtype
-        case shape
-        case dataB64 = "data_b64"
-    }
-}
-
-enum SidecarError: LocalizedError {
-    case invalidResponse
-    case serverError(String)
-    case notReady
-
-    var errorDescription: String? {
-        switch self {
-        case .invalidResponse:
-            "Invalid response from sidecar"
-        case let .serverError(message):
-            message
-        case .notReady:
-            "Cellpose sidecar is not ready"
-        }
     }
 }

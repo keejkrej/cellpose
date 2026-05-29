@@ -67,7 +67,7 @@ public static class SegNpyIO
     public static ArrayPayload ToArrayPayload(SegNpyArray array)
     {
         var dtype = DescrToPayloadDtype(array.Descr);
-        return ArrayCodec.EncodeRaw(array.Data, dtype, array.Shape);
+        return SegNpyArrayCodec.EncodeRaw(array.Data, dtype, array.Shape);
     }
 
     public static SegNpyArray FromLabels(int[] labels, int width, int height)
@@ -95,7 +95,7 @@ public static class SegNpyIO
         {
             Descr = PayloadDtypeToDescr(payload.Dtype),
             Shape = payload.Shape,
-            Data = ArrayCodec.Decode(payload),
+            Data = SegNpyArrayCodec.Decode(payload),
         };
 
     private static byte[] ExtractPicklePayload(byte[] file)
@@ -170,6 +170,26 @@ public static class SegNpyIO
 
         public SegNpyArray Finish() =>
             new() { Shape = Shape, Descr = Descr, Data = Data };
+
+        public SegNpyArray TryFinish()
+        {
+            if (string.IsNullOrEmpty(Descr) && Data.Length > 0 && Shape.Length > 0)
+            {
+                var count = ElementCount(Shape);
+                if (count > 0)
+                {
+                    Descr = (Data.Length / count) switch
+                    {
+                        1 => "u1",
+                        2 => "u2",
+                        4 => "i4",
+                        _ => Descr,
+                    };
+                }
+            }
+
+            return Finish();
+        }
     }
 
     private sealed class PickleReader
@@ -189,7 +209,29 @@ public static class SegNpyIO
             reader.Parse();
             if (reader._segDict == null)
                 throw new SidecarException("Invalid _seg.npy file: missing segmentation dict");
-            return reader._segDict;
+            return FinalizePayload(reader._segDict);
+        }
+
+        private static Dictionary<string, object?> FinalizePayload(Dictionary<string, object?> dict)
+        {
+            foreach (var key in dict.Keys.ToList())
+                dict[key] = FinalizeValue(dict[key]);
+            return dict;
+        }
+
+        private static object? FinalizeValue(object? value)
+        {
+            switch (value)
+            {
+                case NumpyArrayBuilder builder:
+                    return builder.TryFinish();
+                case List<object?> list:
+                    for (var i = 0; i < list.Count; i++)
+                        list[i] = FinalizeValue(list[i]);
+                    return list;
+                default:
+                    return value;
+            }
         }
 
         private void Parse()
@@ -223,13 +265,6 @@ public static class SegNpyIO
                 {
                     var name = (string)_stack.Pop()!;
                     var module = (string)_stack.Pop()!;
-                    _stack.Push($"{module}.{name}");
-                    break;
-                }
-                case (byte)'c':
-                {
-                    var module = ReadLine();
-                    var name = ReadLine();
                     _stack.Push($"{module}.{name}");
                     break;
                 }
@@ -346,7 +381,7 @@ public static class SegNpyIO
                 case (byte)'B':
                     _stack.Push(ReadBinBytes());
                     break;
-                case (byte')':
+                case 0x29: // pickle EMPTY_TUPLE ')'
                     _stack.Push(Array.Empty<object?>());
                     break;
                 default:
@@ -358,44 +393,45 @@ public static class SegNpyIO
         {
             if (target is NumpyArrayBuilder builder)
             {
-                if (state is byte[] bytes)
-                {
-                    builder.Data = bytes;
+                CollectArrayState(builder, state);
+                if (builder.Data.Length > 0 && builder.Shape.Length > 0 && IsSupportedDescr(builder.Descr))
                     return builder.Finish();
-                }
-
-                if (state is object?[] tuple)
-                {
-                    if (tuple.LastOrDefault() is byte[] raw)
-                    {
-                        builder.Data = raw;
-                        return builder.Finish();
-                    }
-
-                    foreach (var item in tuple)
-                    {
-                        if (item is object?[] shape && shape.All(x => x is long or int))
-                            builder.Shape = shape.Select(x => Convert.ToInt32(x)).ToArray();
-                        else if (item is string descr && descr is "u1" or "u2" or "u4" or "i4" or "f4" or "f8" or "b1")
-                            builder.Descr = descr;
-                        else if (item is object?[] { Length: >= 3 } dtypeTuple &&
-                                 dtypeTuple.Any(x => x is string s && s is "u1" or "u2" or "u4" or "i4" or "f4" or "f8" or "b1"))
-                        {
-                            foreach (var x in dtypeTuple)
-                            {
-                                if (x is string s && s is "u1" or "u2" or "u4" or "i4" or "f4" or "f8" or "b1")
-                                    builder.Descr = s;
-                            }
-                        }
-                    }
-                }
-
                 return builder;
             }
 
             if (state is Dictionary<string, object?> dict)
                 return dict;
             return state ?? target;
+        }
+
+        private static void CollectArrayState(NumpyArrayBuilder builder, object? state)
+        {
+            switch (state)
+            {
+                case byte[] bytes when bytes.Length > 0:
+                    builder.Data = bytes;
+                    break;
+                case string text when IsSupportedDescr(text):
+                    builder.Descr = NormalizeDescr(text);
+                    break;
+                case object?[] items:
+                    if (items.Length > 0 && items.All(static x => x is long or int))
+                    {
+                        var shape = items.Select(static x => Convert.ToInt32(x)).ToArray();
+                        if (shape.Length > 1 || (shape.Length == 1 && shape[0] != 1))
+                            builder.Shape = shape;
+                    }
+
+                    foreach (var item in items)
+                        CollectArrayState(builder, item);
+                    break;
+            }
+        }
+
+        private static bool IsSupportedDescr(string descr)
+        {
+            var normalized = NormalizeDescr(descr);
+            return normalized is "u1" or "u2" or "u4" or "i4" or "f4" or "f8" or "b1";
         }
 
         private object?[] PopMark()

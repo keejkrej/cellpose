@@ -25,6 +25,8 @@ def _default_colors(ncells: int) -> np.ndarray:
 
 def _compute_outlines(masks: np.ndarray) -> np.ndarray:
     masks = np.asarray(masks).squeeze()
+    if masks.ndim == 1:
+        masks = masks.reshape(1, -1)
     return masks * masks_to_outlines(masks)
 
 
@@ -37,6 +39,8 @@ def _resolve_source_image(filename: str, session_path: Path) -> str:
 def session_to_pickle_dict(session: SessionData) -> dict[str, Any]:
     """Build a legacy `_seg.npy` dict payload from ``SessionData``."""
     masks = np.ascontiguousarray(np.asarray(session.masks).squeeze())
+    if masks.ndim == 1:
+        masks = masks.reshape(1, -1)
     max_value = int(masks.max()) if masks.size else 0
     dtype = np.uint16 if max_value < 2**16 - 1 else np.uint32
     masks = masks.astype(dtype, copy=False)

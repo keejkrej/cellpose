@@ -494,14 +494,6 @@ public sealed class SegmentationResult
     public string? Filename { get; init; }
 }
 
-public sealed class ArrayPayload
-{
-    public string Dtype { get; set; } = "";
-    public int[] Shape { get; set; } = [];
-    [JsonPropertyName("data_b64")]
-    public string DataB64 { get; set; } = "";
-}
-
 public sealed class SidecarHealth
 {
     public string Status { get; set; } = "";
@@ -594,9 +586,4 @@ public sealed class SidecarSessionResponse
 public sealed class SidecarErrorResponse
 {
     public string Detail { get; set; } = "";
-}
-
-public sealed class SidecarException : Exception
-{
-    public SidecarException(string message) : base(message) { }
 }

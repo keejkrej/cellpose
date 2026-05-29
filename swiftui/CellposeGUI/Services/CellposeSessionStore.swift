@@ -1,3 +1,4 @@
+import CellposeGUICore
 import Foundation
 
 final class CellposeSessionStore {
@@ -126,7 +127,9 @@ final class CellposeSessionStore {
         switch value {
         case nil, is NSNull:
             return "cpsam"
-        case 0, 0 as Int64:
+        case let intValue as Int where intValue == 0:
+            return "cpsam"
+        case let intValue as Int64 where intValue == 0:
             return "cpsam"
         case let string as String where string == "0" || string.isEmpty:
             return "cpsam"

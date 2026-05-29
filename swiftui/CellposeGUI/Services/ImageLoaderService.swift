@@ -1,4 +1,5 @@
 import CoreGraphics
+import CellposeGUICore
 import Foundation
 import ImageIO
 
