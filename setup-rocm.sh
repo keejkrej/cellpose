@@ -1,32 +1,67 @@
 #!/usr/bin/env bash
-# Fast ROCm setup: sync from uv.lock but skip the CUDA torch stack, then pip ROCm torch.
-# Do not run plain `uv sync` after this — it will re-pull CUDA. Re-run this script instead.
+# Install cellpose into the *active* conda/mamba env with ROCm PyTorch (no uv).
+#
+#   mamba create -n cellpose python=3.12 pip -y
+#   mamba activate cellpose
+#   ./setup-rocm.sh
+#
+# Then: cellpose          # GUI (no image args)
+#       cellpose --use_gpu --dir /path/to/images
 set -euo pipefail
 cd "$(dirname "$0")"
 
 ROCM_INDEX="${ROCM_INDEX:-https://download.pytorch.org/whl/nightly/rocm7.2}"
 
-# CUDA-only packages pulled in by cu130 torch in uv.lock (not needed for ROCm).
-SKIP=(
-  torch torchvision torchaudio triton
-  cuda-bindings cuda-pathfinder cuda-toolkit
-  nvidia-cublas nvidia-cuda-cupti nvidia-cuda-nvrtc nvidia-cuda-runtime
-  nvidia-cudnn-cu13 nvidia-cufft nvidia-cufile nvidia-curand
-  nvidia-cusolver nvidia-cusparse nvidia-cusparselt-cu13
-  nvidia-nccl-cu13 nvidia-nvjitlink nvidia-nvshmem-cu13 nvidia-nvtx
-)
+if [[ -z "${CONDA_PREFIX:-}" ]]; then
+  echo "error: activate a conda/mamba environment first (CONDA_PREFIX is unset)." >&2
+  echo "  mamba create -n cellpose python=3.12 pip -y && mamba activate cellpose" >&2
+  exit 1
+fi
 
-args=(uv sync --frozen)
-for pkg in "${SKIP[@]}"; do
-  args+=(--no-install-package "$pkg")
-done
+if ! command -v python >/dev/null || ! command -v pip >/dev/null; then
+  echo "error: python and pip must be on PATH in the active environment." >&2
+  exit 1
+fi
 
-echo "Syncing cellpose deps (skipping CUDA torch stack)..."
-"${args[@]}"
+echo "Environment: ${CONDA_PREFIX}"
+echo "Python: $(python -V)"
 
 echo "Installing ROCm PyTorch from ${ROCM_INDEX}..."
-# uv 0.11 can fail extracting huge ROCm torch wheels (zip64); pip handles them fine.
-uv pip install -q pip
-.venv/bin/pip install --pre torch torchvision torchaudio --index-url "${ROCM_INDEX}"
+python -m pip install --upgrade pip
+python -m pip install --pre torch torchvision torchaudio --index-url "${ROCM_INDEX}"
 
-.venv/bin/python -c "import torch; print('torch', torch.__version__, 'hip', getattr(torch.version, 'hip', None), 'cuda_available', torch.cuda.is_available())"
+echo "Installing cellpose dependencies (excluding torch/torchvision)..."
+mapfile -t DEPS < <(python - <<'PY'
+import re
+import tomllib
+from pathlib import Path
+
+data = tomllib.loads(Path("pyproject.toml").read_text())
+deps = []
+for spec in data["project"]["dependencies"]:
+    name = re.split(r"[\s[<>=!;@]", spec, maxsplit=1)[0].lower()
+    if name in ("torch", "torchvision", "torchaudio"):
+        continue
+    deps.append(spec)
+print("\n".join(deps))
+PY
+)
+python -m pip install "${DEPS[@]}"
+
+echo "Installing cellpose (editable)..."
+python -m pip install "hatchling==1.27.0" "hatch-vcs>=0.4" "pathspec<0.12"
+python -m pip install --no-deps -e .
+
+python - <<'PY'
+import torch
+print("torch", torch.__version__)
+print("hip", getattr(torch.version, "hip", None))
+print("cuda_available", torch.cuda.is_available())
+if torch.cuda.is_available():
+    print("device", torch.cuda.get_device_name(0))
+import cellpose
+print("cellpose", cellpose.version.version_str)
+print("cellpose CLI:", end=" ")
+import shutil
+print(shutil.which("cellpose") or "(run: python -m cellpose)")
+PY
