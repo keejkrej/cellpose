@@ -25,6 +25,8 @@ echo "Syncing cellpose deps (skipping CUDA torch stack)..."
 "${args[@]}"
 
 echo "Installing ROCm PyTorch from ${ROCM_INDEX}..."
-uv pip install --pre torch torchvision torchaudio --index-url "${ROCM_INDEX}"
+# uv 0.11 can fail extracting huge ROCm torch wheels (zip64); pip handles them fine.
+uv pip install -q pip
+.venv/bin/pip install --pre torch torchvision torchaudio --index-url "${ROCM_INDEX}"
 
-python -c "import torch; print('torch', torch.__version__, 'hip', getattr(torch.version, 'hip', None), 'cuda_available', torch.cuda.is_available())"
+.venv/bin/python -c "import torch; print('torch', torch.__version__, 'hip', getattr(torch.version, 'hip', None), 'cuda_available', torch.cuda.is_available())"
