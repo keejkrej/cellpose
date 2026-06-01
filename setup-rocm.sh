@@ -59,8 +59,8 @@ print("hip", getattr(torch.version, "hip", None))
 print("cuda_available", torch.cuda.is_available())
 if torch.cuda.is_available():
     print("device", torch.cuda.get_device_name(0))
-import cellpose
-print("cellpose", cellpose.version.version_str)
+from cellpose import version, version_str
+print(version_str)
 print("cellpose CLI:", end=" ")
 import shutil
 print(shutil.which("cellpose") or "(run: python -m cellpose)")
