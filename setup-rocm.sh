@@ -1,13 +1,28 @@
 #!/usr/bin/env bash
-# Local AMD/ROCm setup: sync cellpose deps but install PyTorch from ROCm nightlies
-# instead of the CUDA wheels pinned in uv.lock. Safe to commit; only runs when you invoke it.
+# Fast ROCm setup: sync from uv.lock but skip the CUDA torch stack, then pip ROCm torch.
+# Do not run plain `uv sync` after this — it will re-pull CUDA. Re-run this script instead.
 set -euo pipefail
 cd "$(dirname "$0")"
 
 ROCM_INDEX="${ROCM_INDEX:-https://download.pytorch.org/whl/nightly/rocm7.2}"
 
-echo "Syncing project (skipping CUDA torch/torchvision)..."
-uv sync --no-install-package torch --no-install-package torchvision
+# CUDA-only packages pulled in by cu130 torch in uv.lock (not needed for ROCm).
+SKIP=(
+  torch torchvision torchaudio triton
+  cuda-bindings cuda-pathfinder cuda-toolkit
+  nvidia-cublas nvidia-cuda-cupti nvidia-cuda-nvrtc nvidia-cuda-runtime
+  nvidia-cudnn-cu13 nvidia-cufft nvidia-cufile nvidia-curand
+  nvidia-cusolver nvidia-cusparse nvidia-cusparselt-cu13
+  nvidia-nccl-cu13 nvidia-nvjitlink nvidia-nvshmem-cu13 nvidia-nvtx
+)
+
+args=(uv sync --frozen)
+for pkg in "${SKIP[@]}"; do
+  args+=(--no-install-package "$pkg")
+done
+
+echo "Syncing cellpose deps (skipping CUDA torch stack)..."
+"${args[@]}"
 
 echo "Installing ROCm PyTorch from ${ROCM_INDEX}..."
 uv pip install --pre torch torchvision torchaudio --index-url "${ROCM_INDEX}"
