@@ -294,9 +294,7 @@ class ImageDraw(pg.ImageItem):
         if not drawing.stroke_appended:
             drawing.strokes.append(drawing.current_stroke)
             drawing.stroke_appended = True
-            drawing.current_stroke = np.array(drawing.current_stroke)
-            ioutline = drawing.current_stroke[:, 3] == 1
-            drawing.current_point_set.append(list(drawing.current_stroke[ioutline]))
+            drawing.current_point_set.append(list(drawing.current_stroke))
             drawing.current_stroke = []
             controller.add_set()
         if len(drawing.current_point_set) and len(drawing.current_point_set[0]) > 0:
@@ -349,10 +347,10 @@ class ImageDraw(pg.ImageItem):
         ss = (slice(sx[0], sx[1]), slice(sy[0], sy[1]))
         self.image[ts] = mask[ss]
 
-        for ky, y in enumerate(np.arange(ty[0], ty[1], 1, int)):
-            for kx, x in enumerate(np.arange(tx[0], tx[1], 1, int)):
-                iscent = np.logical_and(kx == kcent[0], ky == kcent[1])
-                stroke.append([session.current_z, x, y, iscent])
+        cx = int(ty[0] + kcent[1])
+        cy = int(tx[0] + kcent[0])
+        if not stroke or stroke[-1][1] != cx or stroke[-1][2] != cy:
+            stroke.append([session.current_z, cx, cy, 1])
         self.updateImage()
 
     def setDrawKernel(self, kernel_size=3):
