@@ -36,7 +36,7 @@ public static class MaskMetricsService
             var coords = coordsByLabel[label];
             result[label - 1] = coords.Count >= 5
                 ? EquivalentEllipseDiameters(coords)
-                : EllipseDiameters.Invalid;
+                : new EllipseDiameters(double.NaN, double.NaN);
         }
 
         return result;

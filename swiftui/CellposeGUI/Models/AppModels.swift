@@ -160,6 +160,13 @@ struct InstanceClasses {
         guard let value = Int32(trimmed), value >= 0 else { return nil }
         return value
     }
+
+    func labelMatchesFilter(label: Int32, filterClassID: Int32?) -> Bool {
+        guard label > 0 else { return false }
+        guard let filterClassID else { return true }
+        let row = Int(label) - 1
+        return row >= 0 && row < values.count && values[row] == filterClassID
+    }
 }
 
 enum ViewMode: String, CaseIterable, Identifiable {

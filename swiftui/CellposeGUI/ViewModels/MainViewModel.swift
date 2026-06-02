@@ -132,7 +132,7 @@ final class MainViewModel {
         masks = colored
         ncells = newNcells
         refreshEllipseDiameters()
-        labelsRowsRevision += 1
+        sync(.maskGeometry, pruneSelection: false)
     }
 
     func refreshEllipseDiameters() {
@@ -166,8 +166,35 @@ final class MainViewModel {
         label > 0 && selectedCells.contains(label)
     }
 
+    func sync(_ scope: GuiSyncScope, pruneSelection: Bool = true) {
+        if scope.contains(.canvasSelection) {
+            if pruneSelection {
+                setCellSelection(filterSelectableCells(selectedCellIndices()))
+            } else {
+                selectionRevision += 1
+            }
+        }
+        if scope.contains(.labels) {
+            labelsRowsRevision += 1
+        }
+    }
+
+    private func filterSelectableCells(_ cells: [Int32]) -> [Int32] {
+        let filter = InstanceClasses.parseFilter(classFilterText)
+        if filter == nil {
+            return Array(Set(cells.filter { $0 > 0 })).sorted()
+        }
+        return Array(
+            Set(
+                cells.filter { label in
+                    label > 0 && instanceClasses.labelMatchesFilter(label: label, filterClassID: filter)
+                }
+            )
+        ).sorted()
+    }
+
     func setCellSelection(_ cells: [Int32]) {
-        let normalized = Array(Set(cells.filter { $0 > 0 })).sorted()
+        let normalized = filterSelectableCells(cells)
         guard normalized != selectedCells else {
             selectionRevision += 1
             return
@@ -190,7 +217,11 @@ final class MainViewModel {
 
     func selectCellAt(x: Int, y: Int, additive: Bool) {
         guard let masks else { return }
-        let label = masks.label(at: x, y: y)
+        var label = masks.label(at: x, y: y)
+        let filter = InstanceClasses.parseFilter(classFilterText)
+        if label > 0, !instanceClasses.labelMatchesFilter(label: label, filterClassID: filter) {
+            label = 0
+        }
         if label > 0 {
             if additive {
                 var cells = selectedCells
@@ -252,19 +283,23 @@ final class MainViewModel {
         for idx in selectedCellIndices() {
             let row = Int(idx) - 1
             if row >= 0 {
-                setInstanceClass(row: row, classID: classID)
+                setInstanceClass(row: row, classID: classID, pruneSelection: false)
             }
         }
-        labelsRowsRevision += 1
+        sync(.instanceEdit)
     }
 
-    func setInstanceClass(row: Int, classID: Int32) {
+    func setInstanceClass(row: Int, classID: Int32, pruneSelection: Bool = true) {
         instanceClasses.setClass(row: row, classID: classID)
         guard let currentMasks = session.masks else { return }
         let colored = MaskEditService.withClassColors(masks: currentMasks, classIDs: instanceClasses.values)
         session.masks = colored
         masks = colored
-        labelsRowsRevision += 1
+        if pruneSelection {
+            sync(.instanceEdit)
+        } else {
+            sync([.labels, .canvasMask], pruneSelection: false)
+        }
     }
 
     func applyInferenceResult(_ result: InferResult) {
@@ -496,7 +531,9 @@ final class MainViewModel {
         }
     }
 
-    func refreshLabelsFilter() {}
+    func refreshLabelsFilter() {
+        sync(.filterChange)
+    }
 
     func runSegmentation() async {
         guard session.imagePath != nil else { return }

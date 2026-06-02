@@ -67,9 +67,10 @@ public sealed class MainViewModel : ObservableObject
         DisplayParams.BindDispatcher(dispatcher);
         DisplayParams.PropertyChanged += (_, e) =>
         {
-            if (e.PropertyName is nameof(DisplayParameters.GrayLow) or nameof(DisplayParameters.GrayHigh)
-                or nameof(DisplayParameters.MaskBlend))
-                NotifyCanvasChanged();
+            if (e.PropertyName is nameof(DisplayParameters.GrayLow) or nameof(DisplayParameters.GrayHigh))
+                Sync(GuiSyncScope.CanvasImage);
+            else if (e.PropertyName is nameof(DisplayParameters.MaskBlend))
+                Sync(GuiSyncScope.CanvasMask | GuiSyncScope.CanvasImage);
         };
         TrainingParams = TrainingParameters.CreateDefault(
             Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".cellpose", "models", "custom"));
@@ -245,9 +246,12 @@ public sealed class MainViewModel : ObservableObject
         get => _classFilterText;
         set
         {
-            SetProperty(ref _classFilterText, value);
-            Notify(nameof(FilteredCellCount));
-            NotifyCanvasChanged();
+            if (_classFilterText == value)
+                return;
+
+            _classFilterText = value;
+            Notify(nameof(ClassFilterText));
+            Sync(GuiSyncScope.FilterChange);
         }
     }
 
@@ -420,7 +424,7 @@ public sealed class MainViewModel : ObservableObject
         Progress = 1;
         ImageLoaded = true;
         UpdateSaturationFromImage();
-        Notify(nameof(CanvasRevision));
+        Sync(GuiSyncScope.CanvasImage | GuiSyncScope.CanvasMask);
     }
 
     public void ApplyLoadedSession(LoadedSession loaded)
@@ -491,12 +495,7 @@ public sealed class MainViewModel : ObservableObject
         _session.Masks = masks;
         Masks = masks;
         Ncells = ncells;
-        RefreshEllipseDiameters();
-        LabelsRowsRevision++;
-        Notify(nameof(LabelsRowsRevision));
-        Notify(nameof(FilteredCellCount));
-        Notify(nameof(AllLabelsVisible));
-        NotifyCanvasChanged();
+        Sync(GuiSyncScope.MaskGeometry);
     }
 
     public void SetInstanceClass(int row, int classId)
@@ -511,9 +510,7 @@ public sealed class MainViewModel : ObservableObject
         var updated = MaskEditService.WithClassColors(_session.Masks, InstanceClasses.Values);
         _session.Masks = updated;
         Masks = updated;
-        LabelsRowsRevision++;
-        Notify(nameof(LabelsRowsRevision));
-        NotifyCanvasChanged();
+        Sync(GuiSyncScope.InstanceEdit);
     }
 
     public void ApplyInferenceResult(InferResult result)
@@ -556,7 +553,59 @@ public sealed class MainViewModel : ObservableObject
 
     public int CanvasRevision { get; private set; }
 
-    public void NotifyCanvasChanged() => Notify(nameof(CanvasRevision));
+    public int ImageRevision { get; private set; }
+
+    public int MaskRevision { get; private set; }
+
+    public void NotifyCanvasChanged() => Sync(GuiSyncScope.CanvasImage | GuiSyncScope.CanvasMask);
+
+    public void Sync(GuiSyncScope scope, bool pruneSelection = true)
+    {
+        if (!_dispatcher.HasThreadAccess)
+        {
+            RunOnUi(() => Sync(scope, pruneSelection));
+            return;
+        }
+
+        if (scope.HasFlag(GuiSyncScope.CanvasSelection) && pruneSelection)
+            SetCellSelection(FilterSelectableCells(SelectedCellIndices()));
+
+        if (scope.HasFlag(GuiSyncScope.Labels))
+        {
+            LabelsRowsRevision++;
+            Notify(nameof(LabelsRowsRevision));
+            Notify(nameof(FilteredCellCount));
+            Notify(nameof(AllLabelsVisible));
+        }
+
+        if (scope.HasFlag(GuiSyncScope.VisibilityHeader))
+            Notify(nameof(AllLabelsVisible));
+
+        if (scope.HasFlag(GuiSyncScope.Ellipses))
+            RefreshEllipseDiameters();
+
+        if (scope.HasFlag(GuiSyncScope.CanvasImage))
+        {
+            ImageRevision++;
+            CanvasRevision++;
+            Notify(nameof(ImageRevision));
+            Notify(nameof(CanvasRevision));
+        }
+
+        if (scope.HasFlag(GuiSyncScope.CanvasMask))
+        {
+            MaskRevision++;
+            CanvasRevision++;
+            Notify(nameof(MaskRevision));
+            Notify(nameof(CanvasRevision));
+        }
+
+        if (scope.HasFlag(GuiSyncScope.CanvasSelection))
+        {
+            SelectionRevision++;
+            Notify(nameof(SelectionRevision));
+        }
+    }
 
     public bool IsInstanceLabelVisible(int label) =>
         InstanceClasses.IsLabelVisible(
@@ -571,19 +620,13 @@ public sealed class MainViewModel : ObservableObject
             return;
 
         InstanceVisibility.SetVisible(row, visible);
-        LabelsRowsRevision++;
-        Notify(nameof(LabelsRowsRevision));
-        Notify(nameof(AllLabelsVisible));
-        NotifyCanvasChanged();
+        Sync(GuiSyncScope.VisibilityEdit);
     }
 
     public void SetAllInstanceVisible(bool visible)
     {
         InstanceVisibility.SetAll(_ncells, visible);
-        LabelsRowsRevision++;
-        Notify(nameof(LabelsRowsRevision));
-        Notify(nameof(AllLabelsVisible));
-        NotifyCanvasChanged();
+        Sync(GuiSyncScope.VisibilityEdit);
     }
 
     public async Task RefreshModelsAsync()
@@ -906,6 +949,19 @@ public sealed class MainViewModel : ObservableObject
         });
     }
 
+    private List<int> FilterSelectableCells(IEnumerable<int> cells)
+    {
+        var filter = InstanceClasses.ParseFilter(_classFilterText);
+        if (filter == null)
+            return cells.Where(c => c > 0).Distinct().OrderBy(c => c).ToList();
+
+        return cells
+            .Where(c => c > 0 && InstanceClasses.LabelMatchesFilter(c, filter))
+            .Distinct()
+            .OrderBy(c => c)
+            .ToList();
+    }
+
     public void SetCellSelection(IReadOnlyList<int> cells)
     {
         if (!_dispatcher.HasThreadAccess)
@@ -914,7 +970,7 @@ public sealed class MainViewModel : ObservableObject
             return;
         }
 
-        var normalized = cells.Where(c => c > 0).Distinct().OrderBy(c => c).ToList();
+        var normalized = FilterSelectableCells(cells);
         if (_selectedCells.SequenceEqual(normalized))
         {
             SelectionRevision++;
@@ -946,6 +1002,10 @@ public sealed class MainViewModel : ObservableObject
             return;
 
         var label = _masks.LabelAt(x, y);
+        var filter = InstanceClasses.ParseFilter(_classFilterText);
+        if (label > 0 && !InstanceClasses.LabelMatchesFilter(label, filter))
+            label = 0;
+
         if (label > 0)
         {
             if (additive)
@@ -1002,7 +1062,7 @@ public sealed class MainViewModel : ObservableObject
 
     public void ApplyClassToSelectedCells(int classId)
     {
-        foreach (var idx in SelectedCellIndices())
+        foreach (var idx in SelectedCellIndices().ToList())
         {
             var row = idx - 1;
             if (row >= 0)

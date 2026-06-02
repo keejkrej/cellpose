@@ -321,6 +321,17 @@ public sealed class InstanceClasses
         return int.TryParse(trimmed, out var value) && value >= 0 ? value : null;
     }
 
+    public bool LabelMatchesFilter(int label, int? filterClassId)
+    {
+        if (label <= 0)
+            return false;
+        if (filterClassId == null)
+            return true;
+
+        var row = label - 1;
+        return row >= 0 && row < Values.Count && Values[row] == filterClassId.Value;
+    }
+
     public static bool IsLabelVisible(
         int label,
         IReadOnlyList<int> classes,

@@ -31,7 +31,8 @@ public sealed class ImageCanvasControl : Grid
     private Point _panOffsetStart;
     private Point _lastPointerPosition;
     private byte[]? _baseLayerPixels;
-    private int _baseLayerRevision = -1;
+    private int _cachedImageRevision = -1;
+    private int _cachedMaskRevision = -1;
     private int _baseLayerWidth;
     private int _baseLayerHeight;
     private readonly Canvas _overlayCanvas = new() { IsHitTestVisible = false };
@@ -131,12 +132,13 @@ public sealed class ImageCanvasControl : Grid
             nameof(MainViewModel.Masks) or
             nameof(MainViewModel.ShowMasks) or
             nameof(MainViewModel.ShowOutlines) or
-            nameof(MainViewModel.SelectedCell) or
-            nameof(MainViewModel.SelectionRevision) or
             nameof(MainViewModel.ViewMode) or
+            nameof(MainViewModel.ImageRevision) or
+            nameof(MainViewModel.MaskRevision) or
+            nameof(MainViewModel.LabelsRowsRevision) or
             nameof(MainViewModel.CanvasRevision))
         {
-            _baseLayerRevision = -1;
+            InvalidateBaseLayer();
             Redraw();
             return;
         }
@@ -176,7 +178,7 @@ public sealed class ImageCanvasControl : Grid
         {
             _imageControl.Source = null;
             _baseLayerPixels = null;
-            _baseLayerRevision = -1;
+            InvalidateBaseLayer();
             return;
         }
 
@@ -184,13 +186,15 @@ public sealed class ImageCanvasControl : Grid
         if (pixelCount <= 0)
             return;
 
-        if (_baseLayerRevision != _viewModel!.CanvasRevision ||
+        if (_cachedImageRevision != _viewModel!.ImageRevision ||
+            _cachedMaskRevision != _viewModel.MaskRevision ||
             _baseLayerPixels == null ||
             _baseLayerWidth != image.Width ||
             _baseLayerHeight != image.Height)
         {
             _baseLayerPixels = BuildBaseLayerPixels(image, _viewModel);
-            _baseLayerRevision = _viewModel.CanvasRevision;
+            _cachedImageRevision = _viewModel.ImageRevision;
+            _cachedMaskRevision = _viewModel.MaskRevision;
             _baseLayerWidth = image.Width;
             _baseLayerHeight = image.Height;
         }
@@ -234,6 +238,12 @@ public sealed class ImageCanvasControl : Grid
             DrawMaskOverlay(pixels, viewModel, maskWeight);
 
         return pixels;
+    }
+
+    private void InvalidateBaseLayer()
+    {
+        _cachedImageRevision = -1;
+        _cachedMaskRevision = -1;
     }
 
     private void UpdateClip()
@@ -316,7 +326,7 @@ public sealed class ImageCanvasControl : Grid
                     viewModel.IsInstanceLabelVisible(fillLabel) &&
                     masks.ColorAt(x, y) is { } fillColor)
                 {
-                    var alpha = (viewModel.IsCellSelected(fillLabel) ? 0.75f : fillColor.Alpha) * weight;
+                    var alpha = fillColor.Alpha * weight;
                     BlendPixel(pixels, offset, fillColor.R, fillColor.G, fillColor.B, alpha);
                 }
 
@@ -327,7 +337,7 @@ public sealed class ImageCanvasControl : Grid
                 if (outlineLabel <= 0 || !viewModel.IsInstanceLabelVisible(outlineLabel))
                     continue;
 
-                var outlinePixelAlpha = (viewModel.IsCellSelected(outlineLabel) ? 0.85f : outlineAlpha) * weight;
+                var outlinePixelAlpha = outlineAlpha * weight;
                 BlendPixel(pixels, offset, outlineR, outlineG, outlineB, outlinePixelAlpha);
             }
         }

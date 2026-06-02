@@ -64,6 +64,9 @@ struct RightSidebarView: View {
                         Text("class filter:")
                         TextField("all", text: $viewModel.classFilterText)
                             .onSubmit { viewModel.refreshLabelsFilter() }
+                            .onChange(of: viewModel.classFilterText) { _, _ in
+                                viewModel.refreshLabelsFilter()
+                            }
                     }
                     LabelsTableView(viewModel: viewModel)
                         .frame(minHeight: 120)

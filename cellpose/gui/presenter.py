@@ -39,6 +39,7 @@ from cellpose.app_core import series
 from .ui import menus
 from .ui.dialogs import TrainWindow, prompt_series_templates
 from .model import InstanceClasses, MainModel, SegmentationParameters, SeriesState
+from .sync import SyncRequest, SyncScope, create_sync_notifier
 from .view import LabelRow, SeriesNavViewState
 from .ui.widgets import brush_cursor, select_cursor
 
@@ -158,6 +159,8 @@ class MainPresenter:
         self.cp_model = None
         self.current_model = "cpsam"
         self.current_model_path = None
+        self._sync_notifier = create_sync_notifier()
+        self._sync_notifier.sync_requested.connect(self._apply_sync_request)
 
     @property
     def session(self):
@@ -269,13 +272,12 @@ class MainPresenter:
         if ncells is None:
             ncells = self.ncells()
         result = self.model.set_instance_classes(ncells, values)
-        self.refresh_labels_table()
+        self.request_sync(SyncScope.LABELS_TABLE)
         return result
 
     def set_instance_class(self, row: int, class_id: int) -> np.ndarray:
         result = self.model.set_instance_class(row, class_id)
-        self.refresh_labels_table()
-        self.refresh_mask_layer()
+        self.request_sync(SyncScope.INSTANCE_EDIT)
         return result
 
     def ensure_instance_visible(
@@ -291,19 +293,19 @@ class MainPresenter:
         if ncells is None:
             ncells = self.ncells()
         result = self.model.set_instance_visible(ncells, values)
-        self.refresh_labels_table()
+        self.request_sync(SyncScope.VISIBILITY_EDIT)
         return result
 
     def set_instance_visible_row(self, row: int, visible: bool) -> np.ndarray:
         result = self.model.set_instance_visible_row(row, visible)
-        self.refresh_mask_layer()
+        self.request_sync(SyncScope.VISIBILITY_EDIT)
         return result
 
     def set_all_instance_visible(self, visible: bool, ncells: int | None = None) -> None:
         if ncells is None:
             ncells = self.ncells()
         self.model.set_all_instance_visible(visible, ncells)
-        self.refresh_mask_layer()
+        self.request_sync(SyncScope.VISIBILITY_EDIT)
 
     def remove_instance_metadata(self, row: int) -> tuple[int, bool]:
         return self.model.remove_instance_metadata(row)
@@ -315,6 +317,46 @@ class MainPresenter:
 
     def reset_instance_metadata(self) -> None:
         self.model.reset_instance_metadata()
+
+    def request_sync(
+        self, scope: SyncScope, *, prune_selection: bool = True
+    ) -> None:
+        self._sync_notifier.sync_requested.emit(
+            SyncRequest(scope, prune_selection=prune_selection)
+        )
+
+    def _apply_sync_request(self, request: SyncRequest) -> None:
+        self._sync(request.scope, prune_selection=request.prune_selection)
+
+    def _sync(self, scope: SyncScope, *, prune_selection: bool = True) -> None:
+        if not scope:
+            return
+
+        if SyncScope.CANVAS_SELECTION in scope and prune_selection:
+            cells = self._filter_selectable_cells(self._selected_cell_indices())
+            if cells != self._selected_cell_indices():
+                self._set_selection_state(cells)
+
+        if SyncScope.LABELS_TABLE in scope:
+            self.refresh_labels_table()
+
+        if SyncScope.VISIBILITY_HEADER in scope:
+            self.sync_visibility_header_checkbox()
+
+        if SyncScope.CANVAS_IMAGE in scope:
+            self.refresh_plot()
+
+        if SyncScope.CANVAS_MASK in scope:
+            self._push_mask_overlay()
+
+        if SyncScope.CANVAS_SELECTION in scope:
+            self._sync_selection_view()
+
+        if SyncScope.SCALE in scope:
+            self.refresh_scale_from_model()
+
+        if SyncScope.CANVAS_MASK in scope or SyncScope.CANVAS_IMAGE in scope:
+            self.view.show_window()
 
     def labels_class_filter(self) -> int | None:
         return InstanceClasses.parse_filter(self.view.read_labels_class_filter())
@@ -395,7 +437,7 @@ class MainPresenter:
             self.labels_table_header_state(),
         )
 
-    def refresh_mask_layer(self) -> None:
+    def _push_mask_overlay(self) -> None:
         session = self.session
         if session.resize:
             session.ly, session.lx = session.lyr, session.lxr
@@ -420,8 +462,20 @@ class MainPresenter:
         blend = session.mask_blend
         self.view.render_mask_overlay(mask_rgb, visible, blend)
         self.view.img.setOpacity(max(0.0, 1.0 - blend))
+
+    def refresh_mask_layer(self) -> None:
+        """Backward-compatible alias: mask + selection overlay."""
+        self.request_sync(SyncScope.CANVAS_MASK | SyncScope.CANVAS_SELECTION)
+
+    def _sync_selection_view(self) -> None:
+        cells = self._selected_cell_indices()
+        self._sync_labels_table_selection_multi(cells)
         self.refresh_selection_boxes()
-        self.view.show_window()
+
+    def _set_selection_state(self, cells: list[int]) -> None:
+        self.model.selection.selected_cells = cells
+        self.model.selection.selected = cells[0] if cells else 0
+        self.model.selection.prev_selected = self.model.selection.selected
 
     def selection_bounds(self) -> list[tuple[int, int, int, int]]:
         indices = (
@@ -441,12 +495,7 @@ class MainPresenter:
         return bounds
 
     def on_labels_filter_changed(self) -> None:
-        cells = self._filter_selectable_cells(self._selected_cell_indices())
-        if cells != self._selected_cell_indices():
-            self._apply_cell_selection(cells)
-        else:
-            self.refresh_labels_table()
-            self.refresh_mask_layer()
+        self.request_sync(SyncScope.FILTER_CHANGE)
 
     # ---- navigation ----
 
@@ -582,17 +631,19 @@ class MainPresenter:
         self.model.clear_masks()
         self.view.set_ncells_count(0)
         self.view.set_mask_action_enabled(False)
-        self.refresh_scale_from_model()
-        self.refresh_mask_layer()
-        self.refresh_labels_table()
-        self.view.render_selection_boxes([])
+        self.request_sync(
+            SyncScope.SCALE
+            | SyncScope.CANVAS_MASK
+            | SyncScope.LABELS_TABLE
+            | SyncScope.CANVAS_SELECTION
+        )
         self.view.render_rect_select_preview(None)
 
     def on_initialize_images(self, image: np.ndarray) -> None:
         self.model.load_image_stack(image)
         self.clear_all()
         self.view.sliders[0].setValue([0, 255])
-        self.refresh_scale_from_model()
+        self.request_sync(SyncScope.SCALE)
 
     def on_image_loaded(self, filename: str, display_filename: str | None = None) -> None:
         self.model.filename = filename
@@ -600,7 +651,7 @@ class MainPresenter:
         self.model.series_state.output_filename = None
         self.model.session.loaded = True
         self.view.set_loaded_chrome(True, ncells=self.ncells())
-        self.refresh_plot()
+        self.request_sync(SyncScope.CANVAS_IMAGE | SyncScope.CANVAS_MASK)
         self.update_canvas_cursor()
 
     def refresh_scale_from_model(self) -> None:
@@ -650,7 +701,7 @@ class MainPresenter:
         else:
             for _ in range(self.session.nz):
                 self.session.saturation[0].append([0, 255.0])
-        self.refresh_plot()
+        self.request_sync(SyncScope.CANVAS_IMAGE)
 
     def remove_cell(self, idx) -> None:
         if isinstance(idx, (int, np.integer)):
@@ -685,8 +736,7 @@ class MainPresenter:
         for i in idx:
             print("GUI_INFO: removed cell %d" % (i - 1))
         self.view.set_ncells_count(self.ncells())
-        self.refresh_labels_table()
-        self.refresh_mask_layer()
+        self.request_sync(SyncScope.INSTANCE_EDIT, prune_selection=False)
         if self.ncells() == 0:
             self.view.set_mask_action_enabled(False)
         self.save_sets()
@@ -713,15 +763,14 @@ class MainPresenter:
                     self.append_instance_metadata(self.view.read_default_class_id(), True)
                     self.view.set_ncells_count(self.ncells())
                     self.view.set_mask_action_enabled(True)
-                    self.refresh_labels_table()
-                    self.refresh_mask_layer()
+                    self.request_sync(SyncScope.INSTANCE_EDIT)
                     self.save_sets()
             else:
                 print("GUI_ERROR: cell too small, not drawn")
             drawing.current_stroke = []
             drawing.strokes = []
             drawing.current_point_set = []
-            self.refresh_mask_layer()
+            self.request_sync(SyncScope.CANVAS_MASK)
 
     def remove_stroke(self, delete_points=True, stroke_ind=-1) -> None:
         stroke = np.array(self.model.drawing.strokes[stroke_ind])
@@ -740,7 +789,7 @@ class MainPresenter:
             )
             if delete_points:
                 del self.model.drawing.current_point_set[stroke_ind]
-            self.refresh_mask_layer()
+            self.request_sync(SyncScope.CANVAS_MASK)
         del self.model.drawing.strokes[stroke_ind]
 
     def merge_cells(self, idx: int) -> None:
@@ -811,7 +860,7 @@ class MainPresenter:
             self.view.set_ncells_count(self.ncells())
             self.session.zdraw.append([])
             self.view.set_mask_action_enabled(True)
-            self.refresh_mask_layer()
+            self.request_sync(SyncScope.INSTANCE_EDIT)
             self.save_sets()
             selection.removed_cell = []
             self.view.set_redo_enabled(False)
@@ -823,7 +872,7 @@ class MainPresenter:
         self.view.set_ncells_count(ncells)
         print(f"GUI_INFO: {ncells} masks found")
         if ncells > 0:
-            self.refresh_mask_layer()
+            self.request_sync(SyncScope.INSTANCE_EDIT)
             self.view.set_mask_action_enabled(True)
         restored = (
             self.session.restore == "filter" or self.session.stack_filtered is not None
@@ -982,7 +1031,7 @@ class MainPresenter:
         self.view.set_ncells_count(ncells)
         print(f"GUI_INFO: {ncells} masks found")
         if ncells > 0:
-            self.refresh_mask_layer()
+            self.request_sync(SyncScope.INSTANCE_EDIT)
             self.view.set_mask_action_enabled(True)
         restored = self.session.stack_filtered is not None
         self.view.set_view_mode(3 if restored else 0, restored_enabled=restored)
@@ -1007,8 +1056,9 @@ class MainPresenter:
         self.model.session.loaded = True
         self.view.set_loaded_chrome(True, ncells=self.ncells())
         self.update_canvas_cursor()
-        self.refresh_mask_layer()
-        self.refresh_plot()
+        self.request_sync(
+            SyncScope.CANVAS_IMAGE | SyncScope.CANVAS_MASK | SyncScope.LABELS_TABLE
+        )
 
     def save_sets(self) -> None:
         from cellpose.app_core import write_session
@@ -1184,7 +1234,9 @@ class MainPresenter:
         view.EditSelectedButton.clicked.connect(self.edit_selected_cells)
         view.ModelChooseC.activated.connect(lambda: self.model_choose(custom=True))
         view.ModelButtonC.clicked.connect(self.run_selected_model)
-        view.ncells_counter.valueChanged.connect(lambda *_: self.refresh_labels_table())
+        view.ncells_counter.valueChanged.connect(
+            lambda *_: self.request_sync(SyncScope.LABELS_TABLE)
+        )
         view.LabelsClassFilter.returnPressed.connect(self.on_labels_filter_changed)
 
     def _wire_series_nav(self) -> None:
@@ -1214,7 +1266,7 @@ class MainPresenter:
     def _wire_seg_params(self) -> None:
         root = self.view.seg_param_root
         root.param("diameter").sigValueChanged.connect(
-            lambda *_: self.refresh_scale_from_model()
+            lambda *_: self.request_sync(SyncScope.SCALE)
         )
         root.param("flow_threshold").sigValueChanged.connect(
             lambda *_: self.compute_cprob()
@@ -1579,17 +1631,16 @@ class MainPresenter:
         if not self.session.loaded:
             return
         self.session.mask_blend = self.view.read_mask_blend()
-        self.refresh_mask_layer()
-        self.refresh_plot()
+        self.request_sync(SyncScope.CANVAS_IMAGE | SyncScope.CANVAS_MASK)
 
     def on_saturation_changed(self) -> None:
         if self.session.loaded:
             sval = self.view.sliders[0].value()
             self.session.saturation[0][self.session.current_z] = sval
-            self.refresh_plot()
+            self.request_sync(SyncScope.CANVAS_IMAGE)
 
     def on_view_mode_changed(self) -> None:
-        self.refresh_plot()
+        self.request_sync(SyncScope.CANVAS_IMAGE)
 
     def plot_double_clicked(self, event) -> None:
         if (
@@ -1641,29 +1692,19 @@ class MainPresenter:
 
     def _apply_cell_selection(self, cells: list[int]) -> None:
         cells = self._filter_selectable_cells(cells)
-        self.model.selection.selected_cells = cells
-        self.model.selection.selected = cells[0] if cells else 0
-        self.model.selection.prev_selected = self.model.selection.selected
-        self._sync_labels_table_selection_multi(cells)
-        self.refresh_selection_boxes()
+        self._set_selection_state(cells)
+        self.request_sync(SyncScope.SELECTION_CHANGE, prune_selection=False)
 
     def select_cell(self, idx: int) -> None:
         if idx > 0 and idx not in self._filter_selectable_cells([idx]):
             idx = 0
         self.model.selection.prev_selected = self.model.selection.selected
-        self.model.selection.selected = idx
-        self.model.selection.selected_cells = [idx] if idx > 0 else []
-        if self.model.selection.selected > 0:
-            self._sync_labels_table_selection_multi([idx])
-            self.refresh_selection_boxes()
-        else:
-            self.view.render_selection_boxes([])
+        self._set_selection_state([idx] if idx > 0 else [])
+        self.request_sync(SyncScope.SELECTION_CHANGE, prune_selection=False)
 
     def unselect_cell(self) -> None:
-        self.model.selection.selected = 0
-        self.model.selection.selected_cells = []
-        self.view.render_selection_boxes([])
-        self._sync_labels_table_selection_multi([])
+        self._set_selection_state([])
+        self.request_sync(SyncScope.SELECTION_CHANGE, prune_selection=False)
 
     def on_labels_table_selection_changed(self) -> None:
         view = self.view
@@ -1672,20 +1713,18 @@ class MainPresenter:
         selected_rows = view.LabelsTable.selectionModel().selectedRows()
         if not selected_rows:
             if self.model.selection.selected > 0 or self.model.selection.selected_cells:
-                self.model.selection.selected = 0
-                self.model.selection.selected_cells = []
-                self.view.render_selection_boxes([])
+                self._set_selection_state([])
+                self.request_sync(SyncScope.SELECTION_CHANGE, prune_selection=False)
             return
         cells = self._filter_selectable_cells(
             sorted({row.row() + 1 for row in selected_rows})
         )
         if cells == self.model.selection.selected_cells:
-            self.refresh_selection_boxes()
+            self.request_sync(SyncScope.SELECTION_CHANGE, prune_selection=False)
             return
         self.model.selection.prev_selected = self.model.selection.selected
-        self.model.selection.selected_cells = cells
-        self.model.selection.selected = cells[0] if cells else 0
-        self.refresh_selection_boxes()
+        self._set_selection_state(cells)
+        self.request_sync(SyncScope.SELECTION_CHANGE, prune_selection=False)
 
     def _normalize_rect(self, x0, y0, x1, y1):
         x0, x1 = sorted([int(x0), int(x1)])
@@ -1774,7 +1813,7 @@ class MainPresenter:
             self.session.mask_rgb[self.session.cellpix[z] == idx] = np.array(
                 [255, 255, 255], dtype=np.uint8
             )
-            self.refresh_mask_layer()
+            self.request_sync(SyncScope.CANVAS_MASK)
 
     def unselect_cell_multi(self, idx: int) -> None:
         z = self.session.current_z
@@ -1784,7 +1823,7 @@ class MainPresenter:
         self.session.mask_rgb[self.session.outpix[z] == idx] = np.array(
             self.session.outcolor, dtype=np.uint8
         )
-        self.refresh_mask_layer()
+        self.request_sync(SyncScope.CANVAS_MASK)
 
     # ---- ROI bulk delete ----
 
@@ -1881,7 +1920,7 @@ class MainPresenter:
             self.select_cell_multi(idx)
             self.model.selection.removing_cells_list.append(idx)
 
-        self.refresh_mask_layer()
+        self.request_sync(SyncScope.CANVAS_MASK)
 
     # ---- labels table ----
 
@@ -2024,8 +2063,7 @@ class MainPresenter:
             row = idx - 1
             if row >= 0:
                 self.model.set_instance_class(row, class_id)
-        self.refresh_labels_table()
-        self.refresh_mask_layer()
+        self.request_sync(SyncScope.INSTANCE_EDIT)
         if self.session.loaded:
             self.save_sets()
 
@@ -2080,7 +2118,7 @@ class MainPresenter:
         drawing.in_stroke = False
         drawing.current_stroke = []
         drawing.stroke_appended = True
-        self.refresh_mask_layer()
+        self.request_sync(SyncScope.CANVAS_MASK)
 
     def toggle_rect_select_mode(self, enabled: bool) -> None:
         view = self.view
