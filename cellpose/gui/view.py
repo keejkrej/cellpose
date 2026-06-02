@@ -127,6 +127,7 @@ class MainView(QMainWindow):
         viewport = self._canvas_viewport()
         if viewport is not None:
             viewport.installEventFilter(self)
+        self.apply_theme()
 
         bwrmap = make_bwr()
         self.bwr = bwrmap.getLookupTable(start=0.0, stop=255.0, alpha=False)
@@ -147,6 +148,28 @@ class MainView(QMainWindow):
             self.layer.set_controller(controller)
         else:
             self.layer.controller = controller
+
+    def apply_theme(self, dark: bool | None = None) -> None:
+        if dark is None:
+            from .theme import is_dark_mode
+            from qtpy.QtWidgets import QApplication
+
+            app = QApplication.instance()
+            dark = is_dark_mode(app) if app is not None else False
+        self.win.setBackground("default")
+
+    def changeEvent(self, event):
+        if event.type() == QtCore.QEvent.Type.ThemeChange:
+            from .theme import apply_app_theme, apply_pyqtgraph_theme, is_dark_mode
+            from qtpy.QtWidgets import QApplication
+
+            app = QApplication.instance()
+            if app is not None:
+                apply_app_theme(app)
+                dark = is_dark_mode(app)
+                apply_pyqtgraph_theme(dark)
+                self.apply_theme(dark)
+        super().changeEvent(event)
 
     def level_change(self, name):
         self.saturation_changed.emit(name)

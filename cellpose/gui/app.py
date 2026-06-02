@@ -19,6 +19,7 @@ from .. import models
 from ..utils import download_url_to_file
 from .model import MainModel
 from .presenter import MainPresenter
+from .theme import install_system_theme_sync
 from .view import MainView
 
 
@@ -48,6 +49,7 @@ def run(image=None) -> None:
     app = QApplication(sys.argv)
     _setup_app_icon(app)
     app.setStyle("Fusion")
+    install_system_theme_sync(app)
 
     model = MainModel(
         model_save_folder=os.fspath(models.MODEL_DIR.joinpath("custom")),
