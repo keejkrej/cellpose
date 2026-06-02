@@ -1,10 +1,9 @@
 """Cellpose GUI package."""
 
-from .model import MainModel
-from .presenter import MainPresenter
-from .app import run
-from .view import MainView, MainW
-from .view_protocol import LabelRow, MainViewProtocol, SeriesNavViewState
+from .core.app import run
+from .core.model import MainModel
+from .core.presenter import MainPresenter
+from .core.view import LabelRow, MainView, MainViewProtocol, MainW, SeriesNavViewState
 
 __all__ = [
     "LabelRow",

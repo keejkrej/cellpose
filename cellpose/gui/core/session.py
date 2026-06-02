@@ -1,8 +1,9 @@
-"""Read and write pickled `_seg.npy` session files (original Cellpose format)."""
+"""Portable pickled `_seg.npy` session files (original Cellpose format)."""
 
 from __future__ import annotations
 
 import os
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -10,7 +11,53 @@ import numpy as np
 
 from cellpose.utils import masks_to_outlines
 
-from .models import SessionData, SegmentationMetadata
+SESSION_EXTENSION = ".npy"
+SESSION_SUFFIX = "_seg.npy"
+
+
+@dataclass
+class SegmentationMetadata:
+    flow_threshold: float = 0.4
+    cellprob_threshold: float = 0.0
+    diameter: float | None = None
+    niter: int = 200
+    min_size: int = 15
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "flow_threshold": self.flow_threshold,
+            "cellprob_threshold": self.cellprob_threshold,
+            "diameter": self.diameter,
+            "niter": self.niter,
+            "min_size": self.min_size,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> SegmentationMetadata:
+        return cls(
+            flow_threshold=float(data.get("flow_threshold", 0.4)),
+            cellprob_threshold=float(data.get("cellprob_threshold", 0.0)),
+            diameter=data.get("diameter"),
+            niter=int(data.get("niter", 200)),
+            min_size=int(data.get("min_size", 15)),
+        )
+
+
+@dataclass
+class SessionData:
+    source_image: str
+    masks: np.ndarray
+    flows: list[np.ndarray] | None = None
+    colors: np.ndarray | None = None
+    instance_classes: np.ndarray | None = None
+    ismanual: np.ndarray | None = None
+    model: str = "cpsam"
+    recompute_masks: bool = False
+    segmentation: SegmentationMetadata = field(default_factory=SegmentationMetadata)
+
+    @property
+    def ncells(self) -> int:
+        return int(self.masks.max()) if self.masks.size else 0
 
 
 def default_session_path(image_path: str) -> str:
@@ -153,3 +200,16 @@ def read_session(path: str | os.PathLike[str]) -> SessionData:
     if not isinstance(dat, dict):
         raise ValueError("Invalid _seg.npy file: expected pickled dict payload")
     return session_from_pickle_dict(dat, path)
+
+
+__all__ = [
+    "SESSION_EXTENSION",
+    "SESSION_SUFFIX",
+    "SegmentationMetadata",
+    "SessionData",
+    "default_session_path",
+    "read_session",
+    "session_from_pickle_dict",
+    "session_to_pickle_dict",
+    "write_session",
+]
