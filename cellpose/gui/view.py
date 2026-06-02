@@ -32,6 +32,7 @@ from qtpy.QtWidgets import (
     QMessageBox,
     QProgressBar,
     QPushButton,
+    QSlider,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
@@ -109,6 +110,8 @@ class MainViewProtocol(Protocol):
 
     def read_saturation_range(self) -> tuple[float, float]: ...
 
+    def read_mask_blend(self) -> float: ...
+
     def read_view_mode_index(self) -> int: ...
 
     # ---- widget output (write) ----
@@ -158,7 +161,12 @@ class MainViewProtocol(Protocol):
         lut: np.ndarray | None = None,
     ) -> None: ...
 
-    def render_mask_overlay(self, layerz: np.ndarray) -> None: ...
+    def render_mask_overlay(
+        self,
+        mask_rgb: np.ndarray,
+        visible: np.ndarray,
+        blend: float,
+    ) -> None: ...
 
     def render_diameter_scale(self, radii: np.ndarray) -> None: ...
 
@@ -171,6 +179,8 @@ class MainViewProtocol(Protocol):
     ) -> None: ...
 
     def sync_saturation_slider(self, low: float, high: float) -> None: ...
+
+    def sync_mask_blend_slider(self, value: float) -> None: ...
 
     def refresh_plot_from_model(self) -> None: ...
 
@@ -194,6 +204,7 @@ class MainView(QMainWindow):
     rect_select_release = QtCore.Signal(object, object)
     plot_double_clicked = QtCore.Signal()
     saturation_changed = QtCore.Signal(str)
+    mask_blend_changed = QtCore.Signal()
 
     def __init__(self, logger=None):
         super().__init__()
@@ -298,6 +309,14 @@ class MainView(QMainWindow):
     def level_change(self, name):
         self.saturation_changed.emit(name)
 
+    def _on_mask_blend_slider_changed(self, _value: int) -> None:
+        self._update_mask_blend_label()
+        self.mask_blend_changed.emit()
+
+    def _update_mask_blend_label(self) -> None:
+        if hasattr(self, "mask_blend_value_label"):
+            self.mask_blend_value_label.setText(f"{self.read_mask_blend():.2f}")
+
     # ---- MainViewProtocol: widget input ----
 
     def read_segmentation_widgets(self):
@@ -344,6 +363,9 @@ class MainView(QMainWindow):
     def read_saturation_range(self) -> tuple[float, float]:
         low, high = self.sliders[0].value()
         return float(low), float(high)
+
+    def read_mask_blend(self) -> float:
+        return float(self.mask_blend_slider.value()) / 100.0
 
     def read_view_mode_index(self) -> int:
         return int(self.ViewDropDown.currentIndex())
@@ -432,6 +454,7 @@ class MainView(QMainWindow):
             self.autoSaturationButton.setEnabled(True)
             self.newmodel.setEnabled(True)
             self.sliders[0].setEnabled(True)
+            self.mask_blend_slider.setEnabled(True)
             self.set_mask_action_enabled(ncells > 0)
             self._update_canvas_cursor()
         else:
@@ -495,12 +518,26 @@ class MainView(QMainWindow):
         image: np.ndarray,
         levels: list[float] | tuple[float, float],
         lut: np.ndarray | None = None,
+        *,
+        opacity: float = 1.0,
     ) -> None:
         self.img.setImage(as_gray_image(image), autoLevels=False, lut=lut)
         self.img.setLevels(list(levels))
+        self.img.setOpacity(max(0.0, min(1.0, opacity)))
 
-    def render_mask_overlay(self, layerz: np.ndarray) -> None:
-        self.layer.setImage(layerz, autoLevels=False)
+    def render_mask_overlay(
+        self,
+        mask_rgb: np.ndarray,
+        visible: np.ndarray,
+        blend: float,
+    ) -> None:
+        blend = max(0.0, min(1.0, blend))
+        alpha = np.zeros(mask_rgb.shape[:2], dtype=np.uint8)
+        if blend > 0:
+            alpha[visible] = int(round(blend * 255))
+        rgba = np.dstack([mask_rgb, alpha])
+        self.layer.setOpacity(1.0)
+        self.layer.setImage(rgba, autoLevels=False)
 
     def render_diameter_scale(self, radii: np.ndarray) -> None:
         self.scale.setImage(radii, autoLevels=False)
@@ -538,6 +575,12 @@ class MainView(QMainWindow):
 
     def sync_saturation_slider(self, low: float, high: float) -> None:
         self.sliders[0].setValue([low, high])
+
+    def sync_mask_blend_slider(self, value: float) -> None:
+        self.mask_blend_slider.blockSignals(True)
+        self.mask_blend_slider.setValue(int(round(max(0.0, min(1.0, value)) * 100)))
+        self.mask_blend_slider.blockSignals(False)
+        self._update_mask_blend_label()
 
     def refresh_plot_from_model(self) -> None:
         pass
@@ -610,6 +653,8 @@ class MainView(QMainWindow):
 
     def disable_buttons_removeROIs(self):
         self.ModelButtonC.setEnabled(False)
+        if hasattr(self, "mask_blend_slider"):
+            self.mask_blend_slider.setEnabled(False)
         for i in range(len(self.StyleButtons)):
             self.StyleButtons[i].setEnabled(False)
         self.newmodel.setEnabled(False)
@@ -684,13 +729,29 @@ class MainView(QMainWindow):
         self.sliders[-1].setValue([0, 255])
         self.satBoxV.addWidget(self.sliders[-1])
 
+        mask_blend_layout = QHBoxLayout()
+        mask_blend_label = QLabel("mask blend")
+        mask_blend_label.setToolTip("0 = image only, 1 = mask only")
+        mask_blend_layout.addWidget(mask_blend_label)
+        self.mask_blend_slider = QSlider(QtCore.Qt.Orientation.Horizontal)
+        self.mask_blend_slider.setRange(0, 100)
+        self.mask_blend_slider.setValue(50)
+        self.mask_blend_slider.setEnabled(False)
+        self.mask_blend_slider.setTracking(True)
+        self.mask_blend_slider.valueChanged.connect(self._on_mask_blend_slider_changed)
+        mask_blend_layout.addWidget(self.mask_blend_slider, 1)
+        self.mask_blend_value_label = QLabel("0.50")
+        self.mask_blend_value_label.setMinimumWidth(36)
+        mask_blend_layout.addWidget(self.mask_blend_value_label)
+        self.satBoxV.addLayout(mask_blend_layout)
+
         b += 1
         self.drawBox = QGroupBox("Drawing")
         self.drawBoxV = QVBoxLayout()
         self.drawBox.setLayout(self.drawBoxV)
         self.left_sidebar.addWidget(self.drawBox, b, 0, 1, 9)
 
-        self.brush_size = 1
+        self.brush_size = 3
 
         default_class_layout = QHBoxLayout()
         default_class_label = QLabel("default class")
@@ -871,7 +932,7 @@ class MainView(QMainWindow):
             invertY=True,
         )
         self.p0.setCursor(QtCore.Qt.CursorShape.ArrowCursor)
-        self.brush_size = 1
+        self.brush_size = 3
         self.win.addItem(self.p0, 0, 0, rowspan=1, colspan=1)
         self.p0.setMenuEnabled(False)
         self.p0.setMouseEnabled(x=True, y=True)

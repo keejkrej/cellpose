@@ -38,6 +38,20 @@
                         <Slider x:Name="GrayHighSlider" Grid.Column="1" Minimum="0" Maximum="255" StepFrequency="1" Value="255" HorizontalAlignment="Stretch" />
                         <TextBlock x:Name="GrayHighValueText" Grid.Column="2" Margin="6,0,0,0" VerticalAlignment="Center" Text="255" />
                     </Grid>
+                    <Grid HorizontalAlignment="Stretch" ToolTipService.ToolTip="0 = image only, 1 = mask only">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="36" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="40" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="blend" VerticalAlignment="Center" />
+                        <TextBlock Grid.Column="1" Margin="4,0,4,0" VerticalAlignment="Center" Text="img" FontSize="10" Opacity="0.7" />
+                        <Slider x:Name="MaskBlendSlider" Grid.Column="2" Minimum="0" Maximum="1" StepFrequency="0.01" Value="0.5" HorizontalAlignment="Stretch" />
+                        <TextBlock Grid.Column="3" Margin="4,0,4,0" VerticalAlignment="Center" Text="mask" FontSize="10" Opacity="0.7" />
+                        <TextBlock x:Name="MaskBlendValueText" Grid.Column="4" Margin="6,0,0,0" VerticalAlignment="Center" Text="0.50" />
+                    </Grid>
                 </StackPanel>
             </Expander>
 

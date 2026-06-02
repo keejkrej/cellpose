@@ -138,9 +138,8 @@ def _paint_mask(session, z, ar, ac, vr, vc, color, idx):
             session.outpix_resize[z, vrr, vcr] = idx
 
     if z == session.current_z:
-        session.layerz[ar, ac, :3] = color
-        session.layerz[ar, ac, -1] = session.opacity
-        session.layerz[vr, vc] = np.array(session.outcolor)
+        session.mask_rgb[ar, ac] = color
+        session.mask_rgb[vr, vc] = np.array(session.outcolor, dtype=np.uint8)
 
 
 def paint_mask_at(
@@ -396,13 +395,18 @@ class MainPresenter:
             else:
                 session.cellpix = session.cellpix_orig.copy()
                 session.outpix = session.outpix_orig.copy()
-        layerz = self.model.build_layer_rgba(filter_class_id=self.labels_class_filter())
+        mask_rgb, visible = self.model.build_layer_rgb(
+            filter_class_id=self.labels_class_filter()
+        )
         stroke_z = np.array([s[0][0] for s in self.model.drawing.strokes])
         in_z = np.nonzero(stroke_z == session.current_z)[0]
         for i in in_z:
             stroke = np.array(self.model.drawing.strokes[i])
-            layerz[stroke[:, 1], stroke[:, 2]] = np.array([255, 0, 255, 100])
-        self.view.render_mask_overlay(layerz)
+            mask_rgb[stroke[:, 1], stroke[:, 2]] = np.array([255, 0, 255], dtype=np.uint8)
+            visible[stroke[:, 1], stroke[:, 2]] = True
+        blend = session.mask_blend
+        self.view.render_mask_overlay(mask_rgb, visible, blend)
+        self.view.img.setOpacity(max(0.0, 1.0 - blend))
         self.refresh_selection_boxes()
         self.view.show_window()
 
@@ -547,6 +551,9 @@ class MainPresenter:
             self.view.BrushButton.setChecked(False)
         self.view.sliders[0].setValue([0, 255])
         self.view.sliders[0].setEnabled(False)
+        self.session.mask_blend = 0.5
+        if hasattr(self.view, "mask_blend_slider"):
+            self.view.sync_mask_blend_slider(0.5)
         self.view.set_view_mode(0, restored_enabled=False)
         self.model.discard_filtered_stack()
         self.clear_all()
@@ -705,21 +712,14 @@ class MainPresenter:
         in_z = stroke[0, 0] == c_z
         if in_z:
             outpix = self.session.outpix[c_z, stroke[:, 1], stroke[:, 2]] > 0
-            self.session.layerz[stroke[~outpix, 1], stroke[~outpix, 2]] = np.array(
-                [0, 0, 0, 0]
-            )
+            self.session.mask_rgb[stroke[~outpix, 1], stroke[~outpix, 2]] = 0
             cellpix = self.session.cellpix[c_z, stroke[:, 1], stroke[:, 2]]
             ccol = self.session.cellcolors.copy()
             if self.model.selection.selected > 0:
                 ccol[self.model.selection.selected] = np.array([255, 255, 255])
-            col2mask = ccol[cellpix]
-            col2mask = np.concatenate(
-                (col2mask, self.session.opacity * (cellpix[:, np.newaxis] > 0)),
-                axis=-1,
-            )
-            self.session.layerz[stroke[:, 1], stroke[:, 2], :] = col2mask
-            self.session.layerz[stroke[outpix, 1], stroke[outpix, 2]] = np.array(
-                self.session.outcolor
+            self.session.mask_rgb[stroke[:, 1], stroke[:, 2]] = ccol[cellpix]
+            self.session.mask_rgb[stroke[outpix, 1], stroke[outpix, 2]] = np.array(
+                self.session.outcolor, dtype=np.uint8
             )
             if delete_points:
                 del self.model.drawing.current_point_set[stroke_ind]
@@ -1216,6 +1216,7 @@ class MainPresenter:
     def _wire_canvas(self) -> None:
         view = self.view
         view.saturation_changed.connect(lambda _name: self.on_saturation_changed())
+        view.mask_blend_changed.connect(self.on_mask_blend_changed)
         view.files_dropped.connect(self.handle_drop)
         view.win.scene().sigMouseClicked.connect(self._handle_plot_click)
         view.rect_select_press.connect(self._on_rect_select_press)
@@ -1530,7 +1531,12 @@ class MainPresenter:
                 else session.stack_filtered[session.current_z]
             )
             low, high = session.saturation[0][session.current_z]
-            self.view.render_image_plane(image, [low, high], lut=None)
+            self.view.render_image_plane(
+                image,
+                [low, high],
+                lut=None,
+                opacity=max(0.0, 1.0 - session.mask_blend),
+            )
         else:
             image = np.zeros((session.ly, session.lx), np.uint8)
             if (
@@ -1538,14 +1544,26 @@ class MainPresenter:
                 and len(session.flows[view_index - 1]) > 0
             ):
                 image = session.flows[view_index - 1][session.current_z]
+            image_opacity = max(0.0, 1.0 - session.mask_blend)
             if view_index > 1:
-                self.view.render_image_plane(image, [0.0, 255.0], lut=self.view.bwr)
+                self.view.render_image_plane(
+                    image, [0.0, 255.0], lut=self.view.bwr, opacity=image_opacity
+                )
             else:
-                self.view.render_image_plane(image, [0.0, 255.0], lut=None)
+                self.view.render_image_plane(
+                    image, [0.0, 255.0], lut=None, opacity=image_opacity
+                )
 
         low, high = session.saturation[0][session.current_z]
         self.view.sync_saturation_slider(low, high)
         self.view.show_window()
+
+    def on_mask_blend_changed(self) -> None:
+        if not self.session.loaded:
+            return
+        self.session.mask_blend = self.view.read_mask_blend()
+        self.refresh_mask_layer()
+        self.refresh_plot()
 
     def on_saturation_changed(self) -> None:
         if self.session.loaded:
@@ -1727,19 +1745,19 @@ class MainPresenter:
     def select_cell_multi(self, idx: int) -> None:
         if idx > 0:
             z = self.session.current_z
-            self.session.layerz[self.session.cellpix[z] == idx] = np.array(
-                [255, 255, 255, self.session.opacity]
+            self.session.mask_rgb[self.session.cellpix[z] == idx] = np.array(
+                [255, 255, 255], dtype=np.uint8
             )
             self.refresh_mask_layer()
 
     def unselect_cell_multi(self, idx: int) -> None:
         z = self.session.current_z
-        self.session.layerz[self.session.cellpix[z] == idx] = np.append(
-            self.session.cellcolors[idx], self.session.opacity
+        self.session.mask_rgb[self.session.cellpix[z] == idx] = self.session.cellcolors[
+            idx
+        ]
+        self.session.mask_rgb[self.session.outpix[z] == idx] = np.array(
+            self.session.outcolor, dtype=np.uint8
         )
-        self.session.layerz[self.session.outpix[z] == idx] = np.array(
-            self.session.outcolor
-        ).astype(np.uint8)
         self.refresh_mask_layer()
 
     # ---- ROI bulk delete ----

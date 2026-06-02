@@ -67,7 +67,8 @@ public sealed class MainViewModel : ObservableObject
         DisplayParams.BindDispatcher(dispatcher);
         DisplayParams.PropertyChanged += (_, e) =>
         {
-            if (e.PropertyName is nameof(DisplayParameters.GrayLow) or nameof(DisplayParameters.GrayHigh))
+            if (e.PropertyName is nameof(DisplayParameters.GrayLow) or nameof(DisplayParameters.GrayHigh)
+                or nameof(DisplayParameters.MaskBlend))
                 NotifyCanvasChanged();
         };
         TrainingParams = TrainingParameters.CreateDefault(

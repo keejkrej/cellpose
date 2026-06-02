@@ -267,15 +267,15 @@ class ImageSession:
     )
     track_changes: list[Any] = field(default_factory=list)
     recompute_masks: bool = False
-    layerz: np.ndarray = field(
-        default_factory=lambda: np.zeros((256, 256, 4), dtype=np.uint8)
+    mask_rgb: np.ndarray = field(
+        default_factory=lambda: np.zeros((256, 256, 3), dtype=np.uint8)
     )
     cellpix_orig: np.ndarray | None = None
     cellpix_resize: np.ndarray | None = None
     outpix_orig: np.ndarray | None = None
     outpix_resize: np.ndarray | None = None
-    opacity: int = 128
-    outcolor: list[int] = field(default_factory=lambda: [200, 200, 255, 200])
+    mask_blend: float = 0.5
+    outcolor: list[int] = field(default_factory=lambda: [200, 200, 255])
     resize: bool = False
 
     @classmethod
@@ -291,7 +291,7 @@ class ImageSession:
         session.stack = np.zeros((1, ly, lx, 3), dtype=np.float32)
         session.cellpix = np.zeros((1, ly, lx), dtype=np.uint16)
         session.outpix = np.zeros((1, ly, lx), dtype=np.uint16)
-        session.layerz = np.zeros((ly, lx, 4), dtype=np.uint8)
+        session.mask_rgb = np.zeros((ly, lx, 3), dtype=np.uint8)
         session.saturation = [[[0, 255] for _ in range(session.nz)]]
         return session
 
@@ -511,7 +511,7 @@ class MainModel:
 
         session.ly, session.lx = session.stack.shape[-3:-1]
         session.ly0, session.lx0 = session.ly, session.lx
-        session.layerz = 255 * np.ones((session.ly, session.lx, 4), dtype=np.uint8)
+        session.mask_rgb = np.zeros((session.ly, session.lx, 3), dtype=np.uint8)
         if session.stack_filtered is not None:
             session.lyr, session.lxr = session.stack_filtered.shape[-3:-1]
         elif session.restore and "upsample" in session.restore:
@@ -527,7 +527,7 @@ class MainModel:
     def clear_masks(self) -> None:
         session = self.session
         if session.restore and "upsample" in session.restore:
-            session.layerz = np.zeros((session.lyr, session.lxr, 4), dtype=np.uint8)
+            session.mask_rgb = np.zeros((session.lyr, session.lxr, 3), dtype=np.uint8)
             session.cellpix = np.zeros((session.nz, session.lyr, session.lxr), np.uint16)
             session.outpix = np.zeros((session.nz, session.lyr, session.lxr), np.uint16)
             session.cellpix_resize = session.cellpix.copy()
@@ -535,7 +535,7 @@ class MainModel:
             session.cellpix_orig = np.zeros((session.nz, session.ly0, session.lx0), np.uint16)
             session.outpix_orig = np.zeros((session.nz, session.ly0, session.lx0), np.uint16)
         else:
-            session.layerz = np.zeros((session.ly, session.lx, 4), dtype=np.uint8)
+            session.mask_rgb = np.zeros((session.ly, session.lx, 3), dtype=np.uint8)
             session.cellpix = np.zeros((session.nz, session.ly, session.lx), np.uint16)
             session.outpix = np.zeros((session.nz, session.ly, session.lx), np.uint16)
         session.cellcolors = np.array([[255, 255, 255]], dtype=np.uint8)
@@ -665,11 +665,10 @@ class MainModel:
             if idx - 1 < len(session.ismanual):
                 session.ismanual = np.delete(session.ismanual, idx - 1)
 
-    def build_layer_rgba(
+    def build_layer_rgb(
         self,
         filter_class_id: int | None = None,
-        stroke_overlay: np.ndarray | None = None,
-    ) -> np.ndarray:
+    ) -> tuple[np.ndarray, np.ndarray]:
         session = self.session
         if session.resize:
             ly, lx = session.lyr, session.lxr
@@ -690,18 +689,16 @@ class MainModel:
             cellpix = session.cellpix
             outpix = session.outpix
 
-        layerz = np.zeros((ly, lx, 4), dtype=np.uint8)
         plane = cellpix[session.current_z]
         visible_pixels = self.visible_cell_pixels(plane, filter_class_id)
-        layerz[..., :3] = session.cellcolors[plane, :]
-        layerz[..., 3] = session.opacity * visible_pixels.astype(np.uint8)
-        layerz[(outpix[session.current_z] > 0) & visible_pixels] = np.array(
-            session.outcolor, dtype=np.uint8
-        )
-        if stroke_overlay is not None:
-            layerz = stroke_overlay
-        session.layerz = layerz
-        return layerz
+        outline_pixels = (outpix[session.current_z] > 0) & visible_pixels
+
+        mask_rgb = np.zeros((ly, lx, 3), dtype=np.uint8)
+        mask_rgb[visible_pixels] = session.cellcolors[plane][visible_pixels]
+        mask_rgb[outline_pixels] = np.array(session.outcolor, dtype=np.uint8)
+
+        session.mask_rgb = mask_rgb
+        return mask_rgb, visible_pixels | outline_pixels
 
     def to_seg_dict(
         self,

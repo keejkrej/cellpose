@@ -10,6 +10,7 @@ public sealed partial class LeftSidebarView : UserControl
     private MainViewModel? _viewModel;
     private bool _suppressAxisSliderEvents;
     private bool _suppressGraySliderEvents;
+    private bool _suppressMaskBlendSliderEvents;
 
     public LeftSidebarView()
     {
@@ -76,6 +77,14 @@ public sealed partial class LeftSidebarView : UserControl
 
         GrayHighSlider.PointerReleased += (_, _) => CommitGrayHigh();
         GrayHighSlider.PointerCaptureLost += (_, _) => CommitGrayHigh();
+
+        MaskBlendSlider.ValueChanged += (_, _) =>
+        {
+            if (_suppressMaskBlendSliderEvents)
+                return;
+
+            CommitMaskBlend();
+        };
 
         DefaultClassBox.ValueChanged += (_, e) =>
         {
@@ -293,6 +302,7 @@ public sealed partial class LeftSidebarView : UserControl
 
         RefreshViewModeCombo();
         SyncGraySliders();
+        SyncMaskBlendSlider();
         UpdateControlStates();
         RefreshAxisRows();
 
@@ -324,6 +334,32 @@ public sealed partial class LeftSidebarView : UserControl
     {
         GrayLowValueText.Text = $"{GrayLowSlider.Value:0}";
         GrayHighValueText.Text = $"{GrayHighSlider.Value:0}";
+    }
+
+    private void SyncMaskBlendSlider()
+    {
+        if (_viewModel == null)
+            return;
+
+        _suppressMaskBlendSliderEvents = true;
+        try
+        {
+            MaskBlendSlider.Value = _viewModel.DisplayParams.MaskBlend;
+            MaskBlendValueText.Text = $"{MaskBlendSlider.Value:0.00}";
+        }
+        finally
+        {
+            _suppressMaskBlendSliderEvents = false;
+        }
+    }
+
+    private void CommitMaskBlend()
+    {
+        if (_suppressMaskBlendSliderEvents || _viewModel == null)
+            return;
+
+        _viewModel.DisplayParams.MaskBlend = MaskBlendSlider.Value;
+        MaskBlendValueText.Text = $"{MaskBlendSlider.Value:0.00}";
     }
 
     private void CommitGrayLow()
@@ -358,6 +394,7 @@ public sealed partial class LeftSidebarView : UserControl
         EditSelectedButton.IsEnabled = _viewModel.CanUseLabelTools;
         GrayLowSlider.IsEnabled = _viewModel.ImageLoaded;
         GrayHighSlider.IsEnabled = _viewModel.ImageLoaded;
+        MaskBlendSlider.IsEnabled = _viewModel.ImageLoaded;
     }
 
     private void UpdateLabelToolButtons()
@@ -392,6 +429,8 @@ public sealed partial class LeftSidebarView : UserControl
     {
         if (e.PropertyName is nameof(DisplayParameters.GrayLow) or nameof(DisplayParameters.GrayHigh))
             SyncGraySliders();
+        if (e.PropertyName is nameof(DisplayParameters.MaskBlend))
+            SyncMaskBlendSlider();
     }
 
     private void OnViewModelPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)

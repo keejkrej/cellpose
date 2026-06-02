@@ -63,6 +63,7 @@ struct SegmentationParameters: Codable, Equatable {
 struct DisplayParameters: Equatable {
     var grayLow: Double = 0
     var grayHigh: Double = 255
+    var maskBlend: Double = 0.5
 }
 
 struct TrainingParameters: Codable, Equatable {

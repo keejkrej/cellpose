@@ -122,6 +122,7 @@ public sealed class DisplayParameters : ObservableObject
 {
     private double _grayLow;
     private double _grayHigh = 255;
+    private double _maskBlend = 0.5;
 
     public double GrayLow
     {
@@ -133,6 +134,12 @@ public sealed class DisplayParameters : ObservableObject
     {
         get => _grayHigh;
         set => SetProperty(ref _grayHigh, value);
+    }
+
+    public double MaskBlend
+    {
+        get => _maskBlend;
+        set => SetProperty(ref _maskBlend, Math.Clamp(value, 0, 1));
     }
 }
 

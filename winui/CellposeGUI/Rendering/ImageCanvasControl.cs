@@ -90,7 +90,8 @@ public sealed class ImageCanvasControl : Grid
 
     private void OnDisplayParamsChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
     {
-        if (e.PropertyName is nameof(DisplayParameters.GrayLow) or nameof(DisplayParameters.GrayHigh))
+        if (e.PropertyName is nameof(DisplayParameters.GrayLow) or nameof(DisplayParameters.GrayHigh)
+            or nameof(DisplayParameters.MaskBlend))
             Redraw();
     }
 
@@ -215,19 +216,22 @@ public sealed class ImageCanvasControl : Grid
     {
         var pixelCount = image.Width * image.Height;
         var (grayLow, grayHigh) = GetDisplayLevels();
+        var imageWeight = 1.0 - Math.Clamp(viewModel.DisplayParams.MaskBlend, 0, 1);
+        var maskWeight = Math.Clamp(viewModel.DisplayParams.MaskBlend, 0, 1);
         var pixels = new byte[pixelCount * 4];
         for (var i = 0; i < pixelCount; i++)
         {
             var gray = ImageData.MapGrayLevel(image.GetGrayValue(i), grayLow, grayHigh);
+            var scaled = (byte)Math.Round(gray * imageWeight);
             var bgraOffset = i * 4;
-            pixels[bgraOffset] = gray;
-            pixels[bgraOffset + 1] = gray;
-            pixels[bgraOffset + 2] = gray;
+            pixels[bgraOffset] = scaled;
+            pixels[bgraOffset + 1] = scaled;
+            pixels[bgraOffset + 2] = scaled;
             pixels[bgraOffset + 3] = 255;
         }
 
-        if (viewModel.ShowMasks || viewModel.ShowOutlines)
-            DrawMaskOverlay(pixels, viewModel);
+        if (maskWeight > 0 && (viewModel.ShowMasks || viewModel.ShowOutlines))
+            DrawMaskOverlay(pixels, viewModel, maskWeight);
 
         return pixels;
     }
@@ -285,10 +289,14 @@ public sealed class ImageCanvasControl : Grid
         return size;
     }
 
-    private void DrawMaskOverlay(byte[] pixels, MainViewModel viewModel)
+    private void DrawMaskOverlay(byte[] pixels, MainViewModel viewModel, double maskWeight)
     {
         var masks = viewModel.Masks;
         if (masks == null)
+            return;
+
+        var weight = (float)Math.Clamp(maskWeight, 0, 1);
+        if (weight <= 0)
             return;
 
         const byte outlineR = 200;
@@ -308,7 +316,7 @@ public sealed class ImageCanvasControl : Grid
                     viewModel.IsInstanceLabelVisible(fillLabel) &&
                     masks.ColorAt(x, y) is { } fillColor)
                 {
-                    var alpha = viewModel.IsCellSelected(fillLabel) ? 0.75f : fillColor.Alpha;
+                    var alpha = (viewModel.IsCellSelected(fillLabel) ? 0.75f : fillColor.Alpha) * weight;
                     BlendPixel(pixels, offset, fillColor.R, fillColor.G, fillColor.B, alpha);
                 }
 
@@ -319,7 +327,7 @@ public sealed class ImageCanvasControl : Grid
                 if (outlineLabel <= 0 || !viewModel.IsInstanceLabelVisible(outlineLabel))
                     continue;
 
-                var outlinePixelAlpha = viewModel.IsCellSelected(outlineLabel) ? 0.85f : outlineAlpha;
+                var outlinePixelAlpha = (viewModel.IsCellSelected(outlineLabel) ? 0.85f : outlineAlpha) * weight;
                 BlendPixel(pixels, offset, outlineR, outlineG, outlineB, outlinePixelAlpha);
             }
         }
@@ -338,7 +346,7 @@ public sealed class ImageCanvasControl : Grid
         const byte strokeG = 0;
         const byte strokeB = 255;
         const float strokeAlpha = 100f / 255f;
-        const int brushSize = 1;
+        const int brushSize = 3;
 
         var points = new List<(int X, int Y)>();
         for (var i = 0; i < stroke.Count; i++)

@@ -48,6 +48,10 @@ struct LeftSidebarView: View {
                         value: $viewModel.displayParams.grayHigh,
                         isEnabled: viewModel.imageLoaded
                     )
+                    MaskBlendSliderRow(
+                        value: $viewModel.displayParams.maskBlend,
+                        isEnabled: viewModel.imageLoaded
+                    )
                 }
 
                 SidebarPanel(title: "Drawing") {
@@ -112,6 +116,30 @@ private struct SaturationSliderRow: View {
                 .frame(width: 28, alignment: .leading)
             Slider(value: $value, in: 0 ... 255)
                 .disabled(!isEnabled)
+        }
+    }
+}
+
+private struct MaskBlendSliderRow: View {
+    @Binding var value: Double
+    let isEnabled: Bool
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Text("blend")
+                .frame(width: 28, alignment: .leading)
+                .help("0 = image only, 1 = mask only")
+            Text("img")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            Slider(value: $value, in: 0 ... 1, step: 0.01)
+                .disabled(!isEnabled)
+            Text("mask")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            Text(String(format: "%.2f", value))
+                .frame(width: 36, alignment: .trailing)
+                .monospacedDigit()
         }
     }
 }

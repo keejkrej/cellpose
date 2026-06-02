@@ -52,6 +52,7 @@ struct ImageCanvasView: NSViewRepresentable {
         nsView.brushMode = viewModel.brushMode
         nsView.selectMode = viewModel.selectMode
         nsView.selectionRevision = viewModel.selectionRevision
+        nsView.maskBlend = viewModel.displayParams.maskBlend
         nsView.zoom = zoom
         nsView.needsDisplay = true
     }
@@ -68,6 +69,7 @@ final class ImageCanvasNSView: NSView {
     var brushMode = false
     var selectMode = false
     var selectionRevision = 0
+    var maskBlend: Double = 0.5
     var zoom: CGFloat = 1
     var onClick: ((NSPoint) -> Void)?
     var onSelectClick: ((NSPoint, Bool) -> Void)?
@@ -82,6 +84,7 @@ final class ImageCanvasNSView: NSView {
     private var selectDragging = false
     private var selectPreviewBounds: (x0: Int, y0: Int, x1: Int, y1: Int)?
     private let selectDragThreshold = 4
+    private let brushSize = 3
 
     override var acceptsFirstResponder: Bool { false }
 
@@ -112,10 +115,16 @@ final class ImageCanvasNSView: NSView {
         )
         let rect = NSRect(origin: origin, size: drawSize)
         context.interpolationQuality = .high
-        context.draw(image, in: rect)
+        let imageWeight = max(0, min(1, 1 - maskBlend))
+        if imageWeight > 0 {
+            context.saveGState()
+            context.setAlpha(imageWeight)
+            context.draw(image, in: rect)
+            context.restoreGState()
+        }
 
         if showMasks || showOutlines, let masks {
-            drawMaskOverlay(masks: masks, in: rect, context: context)
+            drawMaskOverlay(masks: masks, in: rect, context: context, blend: maskBlend)
         }
 
         if inStroke, !liveStroke.isEmpty {
@@ -172,13 +181,43 @@ final class ImageCanvasNSView: NSView {
         context.setFillColor(red: 1, green: 0, blue: 1, alpha: 100.0 / 255.0)
 
         for (x, y) in interpolatedStrokePoints(liveStroke) {
-            let cellRect = NSRect(
-                x: rect.minX + CGFloat(x) * pixelWidth,
-                y: rect.minY + CGFloat(height - y - 1) * pixelHeight,
-                width: max(pixelWidth, 1),
-                height: max(pixelHeight, 1)
+            stampBrush(
+                at: x,
+                y: y,
+                imageWidth: width,
+                imageHeight: height,
+                in: rect,
+                pixelWidth: pixelWidth,
+                pixelHeight: pixelHeight,
+                context: context
             )
-            context.fill(cellRect)
+        }
+    }
+
+    private func stampBrush(
+        at x: Int,
+        y: Int,
+        imageWidth: Int,
+        imageHeight: Int,
+        in rect: NSRect,
+        pixelWidth: CGFloat,
+        pixelHeight: CGFloat,
+        context: CGContext
+    ) {
+        let radius = max(0, brushSize / 2)
+        for dy in -radius ... radius {
+            for dx in -radius ... radius {
+                let px = x + dx
+                let py = y + dy
+                guard px >= 0, py >= 0, px < imageWidth, py < imageHeight else { continue }
+                let cellRect = NSRect(
+                    x: rect.minX + CGFloat(px) * pixelWidth,
+                    y: rect.minY + CGFloat(imageHeight - py - 1) * pixelHeight,
+                    width: max(pixelWidth, 1),
+                    height: max(pixelHeight, 1)
+                )
+                context.fill(cellRect)
+            }
         }
     }
 
@@ -231,10 +270,18 @@ final class ImageCanvasNSView: NSView {
         return points
     }
 
-    private func drawMaskOverlay(masks: MaskData, in rect: NSRect, context: CGContext) {
+    private func drawMaskOverlay(
+        masks: MaskData,
+        in rect: NSRect,
+        context: CGContext,
+        blend: Double
+    ) {
         let width = masks.width
         let height = masks.height
         guard width > 0, height > 0 else { return }
+
+        let maskWeight = max(0, min(1, blend))
+        guard maskWeight > 0 else { return }
 
         let pixelWidth = rect.width / CGFloat(width)
         let pixelHeight = rect.height / CGFloat(height)
@@ -244,7 +291,8 @@ final class ImageCanvasNSView: NSView {
                 let fillLabel = masks.labels[y * width + x]
 
                 if showMasks, fillLabel > 0, let color = masks.color(at: x, y: y) {
-                    let alpha: CGFloat = selectedCells.contains(fillLabel) ? 0.75 : CGFloat(color.3)
+                    let baseAlpha: CGFloat = selectedCells.contains(fillLabel) ? 0.75 : CGFloat(color.3)
+                    let alpha = baseAlpha * CGFloat(maskWeight)
                     context.setFillColor(
                         red: CGFloat(color.0) / 255,
                         green: CGFloat(color.1) / 255,
@@ -264,7 +312,8 @@ final class ImageCanvasNSView: NSView {
                 let outlineLabel = masks.outlineLabels?[y * width + x] ?? 0
                 guard outlineLabel > 0 else { continue }
 
-                let outlineAlpha: CGFloat = selectedCells.contains(outlineLabel) ? 0.85 : 200.0 / 255.0
+                let baseOutlineAlpha: CGFloat = selectedCells.contains(outlineLabel) ? 0.85 : 200.0 / 255.0
+                let outlineAlpha = baseOutlineAlpha * CGFloat(maskWeight)
                 context.setFillColor(red: 200.0 / 255, green: 200.0 / 255, blue: 1, alpha: outlineAlpha)
                 let outlineRect = NSRect(
                     x: rect.minX + CGFloat(x) * pixelWidth,
