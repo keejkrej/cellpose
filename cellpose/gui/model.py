@@ -169,6 +169,14 @@ class InstanceClasses:
             return None
         return class_id if class_id >= 0 else None
 
+    def label_matches_filter(self, label: int, filter_class_id: int | None) -> bool:
+        if label <= 0:
+            return False
+        if filter_class_id is None:
+            return True
+        row = int(label) - 1
+        return row < len(self.values) and int(self.values[row]) == filter_class_id
+
     def visible_cell_pixels(
         self,
         cellpix: np.ndarray,

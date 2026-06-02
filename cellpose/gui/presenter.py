@@ -319,6 +319,19 @@ class MainPresenter:
     def labels_class_filter(self) -> int | None:
         return InstanceClasses.parse_filter(self.view.read_labels_class_filter())
 
+    def _filter_selectable_cells(self, cells: list[int]) -> list[int]:
+        filter_class_id = self.labels_class_filter()
+        if filter_class_id is None:
+            return sorted({int(c) for c in cells if int(c) > 0})
+        self.ensure_instance_classes()
+        return sorted(
+            {
+                int(c)
+                for c in cells
+                if self.model.instances.label_matches_filter(int(c), filter_class_id)
+            }
+        )
+
     def visible_cell_pixels(self, cellpix: np.ndarray) -> np.ndarray:
         self.ensure_instance_classes()
         self.ensure_instance_visible()
@@ -428,8 +441,12 @@ class MainPresenter:
         return bounds
 
     def on_labels_filter_changed(self) -> None:
-        self.refresh_labels_table()
-        self.refresh_mask_layer()
+        cells = self._filter_selectable_cells(self._selected_cell_indices())
+        if cells != self._selected_cell_indices():
+            self._apply_cell_selection(cells)
+        else:
+            self.refresh_labels_table()
+            self.refresh_mask_layer()
 
     # ---- navigation ----
 
@@ -1623,6 +1640,7 @@ class MainPresenter:
         self.view._sync_labels_table_selection_multi(indices)
 
     def _apply_cell_selection(self, cells: list[int]) -> None:
+        cells = self._filter_selectable_cells(cells)
         self.model.selection.selected_cells = cells
         self.model.selection.selected = cells[0] if cells else 0
         self.model.selection.prev_selected = self.model.selection.selected
@@ -1630,6 +1648,8 @@ class MainPresenter:
         self.refresh_selection_boxes()
 
     def select_cell(self, idx: int) -> None:
+        if idx > 0 and idx not in self._filter_selectable_cells([idx]):
+            idx = 0
         self.model.selection.prev_selected = self.model.selection.selected
         self.model.selection.selected = idx
         self.model.selection.selected_cells = [idx] if idx > 0 else []
@@ -1656,7 +1676,9 @@ class MainPresenter:
                 self.model.selection.selected_cells = []
                 self.view.render_selection_boxes([])
             return
-        cells = sorted({row.row() + 1 for row in selected_rows})
+        cells = self._filter_selectable_cells(
+            sorted({row.row() + 1 for row in selected_rows})
+        )
         if cells == self.model.selection.selected_cells:
             self.refresh_selection_boxes()
             return
@@ -1731,6 +1753,8 @@ class MainPresenter:
         if y < 0 or y >= session.ly or x < 0 or x >= session.lx:
             return
         idx = int(session.cellpix[session.current_z, y, x])
+        if idx > 0 and idx not in self._filter_selectable_cells([idx]):
+            idx = 0
         if idx > 0:
             if additive:
                 cells = list(self.model.selection.selected_cells)
@@ -1743,6 +1767,8 @@ class MainPresenter:
             self.unselect_cell()
 
     def select_cell_multi(self, idx: int) -> None:
+        if idx > 0 and idx not in self._filter_selectable_cells([idx]):
+            return
         if idx > 0:
             z = self.session.current_z
             self.session.mask_rgb[self.session.cellpix[z] == idx] = np.array(
