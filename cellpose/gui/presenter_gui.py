@@ -16,7 +16,6 @@ import cv2
 import numpy as np
 from .qt import QtCore, QtGui
 from qtpy.QtWidgets import (
-    QAbstractItemView,
     QDialog,
     QDialogButtonBox,
     QFileDialog,
@@ -509,37 +508,7 @@ class PresenterGuiMixin:
             self.remove_cell(cells)
 
     def _sync_labels_table_selection_multi(self, indices: list[int]) -> None:
-        view = self.view
-        if not hasattr(view, "LabelsTable"):
-            return
-        selection_model = view.LabelsTable.selectionModel()
-        if selection_model is None:
-            return
-
-        view._syncing_labels_table_selection = True
-        selection_model.blockSignals(True)
-        selection_model.clearSelection()
-        for idx in indices:
-            row = int(idx) - 1
-            if 0 <= row < view.LabelsTable.rowCount():
-                index = view.LabelsTable.model().index(row, 0)
-                selection_model.select(
-                    index,
-                    QtCore.QItemSelectionModel.SelectionFlag.Select
-                    | QtCore.QItemSelectionModel.SelectionFlag.Rows,
-                )
-        selection_model.blockSignals(False)
-        view._syncing_labels_table_selection = False
-
-        if indices:
-            first_row = int(indices[0]) - 1
-            if 0 <= first_row < view.LabelsTable.rowCount():
-                item = view.LabelsTable.item(first_row, 0)
-                if item is not None:
-                    view.LabelsTable.scrollToItem(
-                        item,
-                        QAbstractItemView.ScrollHint.EnsureVisible,
-                    )
+        self.view._sync_labels_table_selection_multi(indices)
 
     def _apply_cell_selection(self, cells: list[int]) -> None:
         self.model.selection.selected_cells = cells
@@ -562,14 +531,7 @@ class PresenterGuiMixin:
         self.model.selection.selected = 0
         self.model.selection.selected_cells = []
         self.view.render_selection_boxes([])
-        if hasattr(self.view, "LabelsTable"):
-            selection_model = self.view.LabelsTable.selectionModel()
-            if selection_model is not None:
-                self.view._syncing_labels_table_selection = True
-                selection_model.blockSignals(True)
-                selection_model.clearSelection()
-                selection_model.blockSignals(False)
-                self.view._syncing_labels_table_selection = False
+        self._sync_labels_table_selection_multi([])
 
     def on_labels_table_selection_changed(self) -> None:
         view = self.view

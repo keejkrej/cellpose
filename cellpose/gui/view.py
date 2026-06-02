@@ -464,13 +464,7 @@ class MainView(QMainWindow):
         if selected_cells:
             self._sync_labels_table_selection_multi(selected_cells)
         elif not self._syncing_labels_table_selection:
-            selection_model = self.LabelsTable.selectionModel()
-            if selection_model is not None:
-                self._syncing_labels_table_selection = True
-                selection_model.blockSignals(True)
-                selection_model.clearSelection()
-                selection_model.blockSignals(False)
-                self._syncing_labels_table_selection = False
+            self._sync_labels_table_selection_multi([])
         self._refreshing_labels_table = False
         if header_state is not None and hasattr(self, "_visibility_header"):
             state_map = {
@@ -835,19 +829,29 @@ class MainView(QMainWindow):
             return
 
         self._syncing_labels_table_selection = True
-        selection_model.blockSignals(True)
         selection_model.clearSelection()
+        first_index = None
         for idx in indices:
             row = int(idx) - 1
             if 0 <= row < self.LabelsTable.rowCount():
                 index = self.LabelsTable.model().index(row, 0)
+                if first_index is None:
+                    first_index = index
                 selection_model.select(
                     index,
                     QtCore.QItemSelectionModel.SelectionFlag.Select
                     | QtCore.QItemSelectionModel.SelectionFlag.Rows,
                 )
-        selection_model.blockSignals(False)
+        if first_index is not None:
+            selection_model.setCurrentIndex(
+                first_index,
+                QtCore.QItemSelectionModel.SelectionFlag.NoUpdate,
+            )
         self._syncing_labels_table_selection = False
+
+        viewport = self.LabelsTable.viewport()
+        if viewport is not None:
+            viewport.update()
 
         if indices:
             first_row = int(indices[0]) - 1
