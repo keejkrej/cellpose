@@ -885,7 +885,9 @@ class PresenterGuiMixin:
         for idx in cells:
             row = idx - 1
             if row >= 0:
-                self.set_instance_class(row, class_id)
+                self.model.set_instance_class(row, class_id)
+        self.refresh_labels_table()
+        self.refresh_mask_layer()
         if self.session.loaded:
             self.save_sets()
 
