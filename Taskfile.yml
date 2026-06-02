@@ -111,13 +111,13 @@ tasks:
     cmds:
       - uv run cellpose
 
-  run:sidecar:
-    desc: Start the Python sidecar server
+  run:api:
+    desc: Start the Python API server
     preconditions:
       - sh: command -v uv
         msg: "error: uv not found"
     cmds:
-      - uv run python -m cellpose.gui.sidecar
+      - uv run python -m cellpose.gui.api
 
   test:
     desc: Run all tests

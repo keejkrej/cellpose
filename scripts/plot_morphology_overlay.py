@@ -10,7 +10,7 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 import numpy as np
 
-from cellpose.gui.session_format.io import read_session
+from cellpose.gui.core.session import read_session
 from cellpose.io import imread_2D
 from cellpose.plot import image_to_rgb
 

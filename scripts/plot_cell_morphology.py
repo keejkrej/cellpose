@@ -9,7 +9,7 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 
-from cellpose.gui.session_format.io import read_session
+from cellpose.gui.core.session import read_session
 from cellpose.io import imread_2D
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))

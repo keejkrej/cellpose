@@ -13,7 +13,7 @@ import subprocess
 import sys
 from collections.abc import Callable
 
-from .qt import QtCore, QtGui
+from ..core.qt import QtCore, QtGui
 from qtpy.QtWidgets import QApplication
 
 
@@ -169,7 +169,7 @@ def apply_pyqtgraph_theme(dark: bool) -> None:
 
 
 def _refresh_views(app: QApplication) -> None:
-    from .view import MainView
+    from ..view import MainView
 
     dark = is_dark_mode(app)
     apply_pyqtgraph_theme(dark)

@@ -4,7 +4,7 @@ Dialog views for the Cellpose GUI.
 
 import os
 
-from .qt import QtCore
+from ..core.qt import QtCore
 from qtpy.QtWidgets import (
     QAbstractItemView,
     QComboBox,
@@ -22,8 +22,8 @@ from qtpy.QtWidgets import (
     QVBoxLayout,
 )
 
-from ..io import get_image_files
-from . import io as gui_io
+from ...io import get_image_files
+from ..core import io as gui_io
 
 
 class TrainWindow(QDialog):

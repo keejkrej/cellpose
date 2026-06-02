@@ -8,7 +8,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, HTTPException
 
-from cellpose.gui import io as gui_io
+from cellpose.gui.core import io as gui_io
 from cellpose.models import MODEL_DIR, MODEL_LIST_PATH, get_user_models
 from cellpose.train import train_seg
 

@@ -6,7 +6,7 @@ import os
 
 from fastapi import APIRouter, HTTPException
 
-from cellpose.gui import series
+from cellpose.gui.core import series
 
 from ..session_response import session_response
 from ..schemas import SeriesDiscoverRequest, SeriesNavigateRequest, SessionResponse

@@ -16,7 +16,7 @@ from typing import Any, Protocol
 
 import numpy as np
 
-from ..utils.qt import QtCore, QtGui
+from .core.qt import QtCore, QtGui
 from qtpy.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
@@ -40,10 +40,10 @@ from qtpy.QtWidgets import (
 import pyqtgraph as pg
 from pyqtgraph.parametertree import Parameter, ParameterTree
 
-from ... import version
-from ..utils import series
+from .. import version
+from .core import series
 from .model import SegmentationParameters, SeriesState
-from .widgets import (
+from .ui.widgets import (
     CheckBoxHeader,
     ImageDraw,
     ObservableVariable,
@@ -275,7 +275,7 @@ class MainView(QMainWindow):
 
     def apply_theme(self, dark: bool | None = None) -> None:
         if dark is None:
-            from .theme import is_dark_mode
+            from .ui.theme import is_dark_mode
             from qtpy.QtWidgets import QApplication
 
             app = QApplication.instance()
@@ -284,7 +284,7 @@ class MainView(QMainWindow):
 
     def changeEvent(self, event):
         if event.type() == QtCore.QEvent.Type.ThemeChange:
-            from .theme import apply_app_theme, apply_pyqtgraph_theme, is_dark_mode
+            from .ui.theme import apply_app_theme, apply_pyqtgraph_theme, is_dark_mode
             from qtpy.QtWidgets import QApplication
 
             app = QApplication.instance()

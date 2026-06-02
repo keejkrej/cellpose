@@ -8,8 +8,13 @@ import numpy as np
 
 from fastapi import APIRouter, HTTPException
 
-from cellpose.gui.session_format import default_session_path, read_session, write_session
-from cellpose.gui.session_format.models import SegmentationMetadata, SessionData
+from cellpose.gui.core.session import (
+    SegmentationMetadata,
+    SessionData,
+    default_session_path,
+    read_session,
+    write_session,
+)
 from cellpose.io import imread_2D
 
 from ..mask_ops import apply_masks

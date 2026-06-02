@@ -7,8 +7,13 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from cellpose.gui.session_format import SessionData, read_session, write_session
-from cellpose.gui.session_format.io import default_session_path, session_to_pickle_dict
+from cellpose.gui.core.session import (
+    SessionData,
+    default_session_path,
+    read_session,
+    session_to_pickle_dict,
+    write_session,
+)
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "seg_npy"
 

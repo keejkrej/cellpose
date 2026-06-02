@@ -12,14 +12,14 @@ import pathlib
 import sys
 import warnings
 
-from .qt import QtCore, QtGui
+from .core.qt import QtCore, QtGui
 from qtpy.QtWidgets import QApplication
 
 from .. import models
 from ..utils import download_url_to_file
 from .model import MainModel
 from .presenter import MainPresenter
-from .theme import install_system_theme_sync
+from .ui.theme import install_system_theme_sync
 from .view import MainView
 
 

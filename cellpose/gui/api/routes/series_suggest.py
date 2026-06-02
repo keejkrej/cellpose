@@ -7,7 +7,7 @@ import os
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from cellpose.gui import series
+from cellpose.gui.core import series
 
 router = APIRouter(tags=["series"])
 

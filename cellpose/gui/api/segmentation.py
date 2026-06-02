@@ -10,7 +10,7 @@ import numpy as np
 
 from cellpose import dynamics
 from cellpose.models import CellposeModel, normalize_default
-from cellpose.gui.mask_ops import normalize_mask_dtype, renumber_masks
+from cellpose.gui.core.mask_ops import normalize_mask_dtype, renumber_masks
 from cellpose.transforms import normalize99, resize_image
 
 from .schemas import SegmentationParams

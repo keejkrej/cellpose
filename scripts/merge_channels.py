@@ -12,7 +12,7 @@ from pathlib import Path
 import numpy as np
 
 from cellpose import io
-from cellpose.gui.series import (
+from cellpose.gui.core.series import (
     PLACEHOLDER_ALIASES,
     _sort_key,
     build_series_dataset,

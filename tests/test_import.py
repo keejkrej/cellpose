@@ -16,8 +16,8 @@ def test_gui_imports_without_error():
     from cellpose import gui
 
 
-def test_sidecar_imports_without_error():
-    from cellpose.gui.sidecar.app import create_app
+def test_api_imports_without_error():
+    from cellpose.gui.api.app import create_app
 
     app = create_app()
     assert len(app.routes) > 0

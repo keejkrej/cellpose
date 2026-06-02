@@ -10,8 +10,8 @@ import shutil
 import fastremap
 import numpy as np
 
-from ..io import imread_2D
-from ..models import MODEL_DIR, MODEL_LIST_PATH, get_user_models, normalize_default
+from ...io import imread_2D
+from ...models import MODEL_DIR, MODEL_LIST_PATH, get_user_models, normalize_default
 from . import series
 
 try:
@@ -42,7 +42,7 @@ def _write_model_list(model_strings):
 
 def _get_train_set(image_names):
     """Get training data and labels for images in current folder image_names."""
-    from cellpose.gui.session_format import read_session
+    from cellpose.gui.core.session import read_session
     from cellpose.io import imread
 
     train_data, train_labels, train_files = [], [], []

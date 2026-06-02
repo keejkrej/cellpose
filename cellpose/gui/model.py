@@ -13,7 +13,7 @@ from typing import Any
 
 import numpy as np
 
-from . import series
+from .core import series
 
 
 @dataclass
@@ -568,7 +568,7 @@ class MainModel:
         colors: np.ndarray | None = None,
         colormap: np.ndarray | None = None,
     ) -> int:
-        from . import mask_ops
+        from ..utils import mask_ops
 
         masks = mask_ops.renumber_masks(masks)
         masks = mask_ops.normalize_mask_dtype(masks)
@@ -611,7 +611,7 @@ class MainModel:
     def cell_bounds(
         self, idx: int, z: int | None = None, margin: int = 2
     ) -> tuple[int, int, int, int] | None:
-        from . import mask_ops
+        from ..utils import mask_ops
 
         if z is None:
             z = self.session.current_z
@@ -622,7 +622,7 @@ class MainModel:
     def normalize_rect(
         self, x0: int, y0: int, x1: int, y1: int
     ) -> tuple[int, int, int, int] | None:
-        from . import mask_ops
+        from ..utils import mask_ops
 
         return mask_ops.normalize_rect(
             x0, y0, x1, y1, self.session.ly, self.session.lx
@@ -636,7 +636,7 @@ class MainModel:
         y1: int,
         filter_class_id: int | None = None,
     ) -> list[int]:
-        from . import mask_ops
+        from ..utils import mask_ops
 
         return mask_ops.cells_fully_in_rect(
             self.session.cellpix[self.session.current_z],
@@ -651,7 +651,7 @@ class MainModel:
         )
 
     def remove_cells(self, indices: list[int]) -> None:
-        from . import mask_ops
+        from ..utils import mask_ops
 
         session = self.session
         session.cellpix, session.outpix = mask_ops.remove_cells_from_arrays(
@@ -747,7 +747,7 @@ class MainModel:
         segmentation_params: dict[str, Any] | None = None,
         recompute_masks: bool = False,
     ) -> "SessionData":
-        from cellpose.gui.session_format.models import SessionData, SegmentationMetadata
+        from cellpose.gui.core.session import SessionData, SegmentationMetadata
 
         session = self.session
         segmentation_params = segmentation_params or self.segmentation_params or {}

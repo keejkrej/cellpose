@@ -17,7 +17,7 @@ from typing import Any
 import cv2
 import numpy as np
 import pyqtgraph as pg
-from ..utils.qt import QtCore, QtGui  # noqa: F401 — configure QT_API before qtpy
+from .core.qt import QtCore, QtGui  # noqa: F401 — configure QT_API before qtpy
 from qtpy.QtWidgets import (
     QDialog,
     QDialogButtonBox,
@@ -28,17 +28,17 @@ from qtpy.QtWidgets import (
     QVBoxLayout,
 )
 
-from ... import dynamics, models, train
-from ...io import get_image_files, imread_2D
-from ...models import get_user_models, normalize_default
-from ...plot import disk
-from ...transforms import normalize99, resize_image
-from ...utils import get_mask_ellipse_diameters
-from ..utils import io, series
-from . import menus
+from .. import dynamics, models, train
+from ..io import get_image_files, imread_2D
+from ..models import get_user_models, normalize_default
+from ..plot import disk
+from ..transforms import normalize99, resize_image
+from ..utils import get_mask_ellipse_diameters
+from .core import io, series
+from .ui import menus
 from .model import InstanceClasses, MainModel, SegmentationParameters, SeriesState
 from .view import LabelRow, SeriesNavViewState
-from .widgets import brush_cursor, select_cursor
+from .ui.widgets import brush_cursor, select_cursor
 
 
 def add_mask_from_points(
@@ -611,7 +611,7 @@ class MainPresenter:
             img_norm = self.session.stack_filtered
         else:
             img_norm = self.session.stack
-        from .widgets import as_gray_image
+        from .ui.widgets import as_gray_image
 
         img_gray = as_gray_image(img_norm)
         self.session.saturation = [[]]
@@ -992,7 +992,7 @@ class MainPresenter:
         self.refresh_plot()
 
     def save_sets(self) -> None:
-        from cellpose.gui.utils.session_format import write_session
+        from cellpose.gui.core.session import write_session
 
         filename = self.output_filename(str(self.model.filename))
         base = os.path.splitext(filename)[0]
@@ -1014,7 +1014,7 @@ class MainPresenter:
             print(f"ERROR: {e}")
 
     def train_new_model(self) -> None:
-        from .dialogs import TrainWindow
+        from .ui.dialogs import TrainWindow
 
         current_train_data_folder = self.training_params().get("train_data_folder", "")
         if not current_train_data_folder:
@@ -1297,7 +1297,7 @@ class MainPresenter:
         image=None,
         image_file=None,
     ) -> None:
-        from cellpose.gui.utils.session_format import read_session
+        from cellpose.gui.core.session import read_session
 
         if not filename:
             return
