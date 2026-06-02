@@ -117,7 +117,7 @@ tasks:
       - sh: command -v uv
         msg: "error: uv not found"
     cmds:
-      - uv run python -m cellpose.gui.api
+      - uv run python -m cellpose.api
 
   test:
     desc: Run all tests

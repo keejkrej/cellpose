@@ -5,7 +5,7 @@ from __future__ import annotations
 import cv2
 import numpy as np
 
-from cellpose.gui.core.mask_ops import (
+from cellpose.app_core.mask_ops import (
     compute_outlines,
     ensure_3d_masks,
     normalize_mask_dtype,

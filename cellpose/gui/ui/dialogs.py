@@ -4,13 +4,14 @@ Dialog views for the Cellpose GUI.
 
 import os
 
-from ..core.qt import QtCore
+from ..qt import QtCore
 from qtpy.QtWidgets import (
     QAbstractItemView,
     QComboBox,
     QDialog,
     QDialogButtonBox,
     QFileDialog,
+    QFormLayout,
     QHBoxLayout,
     QHeaderView,
     QLabel,
@@ -22,8 +23,9 @@ from qtpy.QtWidgets import (
     QVBoxLayout,
 )
 
+from cellpose.app_core import series
+from cellpose.app_core.train import get_train_set
 from ...io import get_image_files
-from ..core import io as gui_io
 
 
 class TrainWindow(QDialog):
@@ -134,7 +136,7 @@ class TrainWindow(QDialog):
 
         try:
             image_names = get_image_files(folder, "_masks", look_one_level_down=True)
-            _, train_labels, train_files, _, _ = gui_io._get_train_set(image_names)
+            _, train_labels, train_files, _, _ = get_train_set(image_names)
         except Exception as e:
             self._add_train_preview_message(str(e))
             return
@@ -167,3 +169,42 @@ class TrainWindow(QDialog):
         if folder:
             self.train_folder.setText(folder)
             self._refresh_train_folder_preview()
+
+
+def prompt_series_templates(
+    parent, folder, subfolder_text="", filename_text=""
+):
+    suggestion = series.suggest_series_templates(folder)
+    if not subfolder_text:
+        subfolder_text = suggestion["subfolder_template"]
+    if not filename_text:
+        filename_text = suggestion["filename_template"]
+
+    dialog = QDialog(parent)
+    dialog.setWindowTitle("Load folder with pattern")
+    dialog.setMinimumWidth(500)
+
+    layout = QVBoxLayout(dialog)
+    info_label = QLabel(
+        "Use placeholders {t}, {p}, {c}, {z}. Subfolder matching is case-insensitive."
+    )
+    info_label.setWordWrap(True)
+    layout.addWidget(info_label)
+
+    form = QFormLayout()
+    subfolder_edit = QLineEdit(subfolder_text)
+    filename_edit = QLineEdit(filename_text)
+    form.addRow("Subfolder template:", subfolder_edit)
+    form.addRow("Filename template:", filename_edit)
+    layout.addLayout(form)
+
+    button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+    button_box.accepted.connect(dialog.accept)
+    button_box.rejected.connect(dialog.reject)
+    layout.addWidget(button_box)
+
+    if dialog.exec() != QDialog.Accepted:
+        return None
+
+    return subfolder_edit.text().strip(), filename_edit.text().strip()
+

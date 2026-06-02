@@ -113,7 +113,7 @@ final class SidecarProcessManager {
         proc.currentDirectoryURL = repoRoot
         proc.executableURL = URL(fileURLWithPath: uvPath)
         proc.arguments = [
-            "run", "python", "-m", "cellpose.gui.api",
+            "run", "python", "-m", "cellpose.api",
             "--host", "127.0.0.1",
             "--port", "\(baseURL.port ?? 8787)",
         ]
@@ -169,7 +169,7 @@ final class SidecarProcessManager {
         let detail = stderrBuffer.trimmingCharacters(in: .whitespacesAndNewlines)
         hasFailed = true
         statusMessage = detail.isEmpty
-            ? "Sidecar failed to start. Run `uv run python -m cellpose.gui.api` manually to see errors."
+            ? "Sidecar failed to start. Run `uv run python -m cellpose.api` manually to see errors."
             : "Sidecar failed to start: \(detail)"
     }
 

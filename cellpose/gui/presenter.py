@@ -17,7 +17,8 @@ from typing import Any
 import cv2
 import numpy as np
 import pyqtgraph as pg
-from .core.qt import QtCore, QtGui  # noqa: F401 — configure QT_API before qtpy
+from cellpose.app_core.train import get_train_set
+from .qt import QtCore, QtGui  # noqa: F401 — configure QT_API before qtpy
 from qtpy.QtWidgets import (
     QDialog,
     QDialogButtonBox,
@@ -30,12 +31,13 @@ from qtpy.QtWidgets import (
 
 from .. import dynamics, models, train
 from ..io import get_image_files, imread_2D
-from ..models import get_user_models, normalize_default
+from ..models import MODEL_DIR, MODEL_LIST_PATH, get_user_models, normalize_default
 from ..plot import disk
 from ..transforms import normalize99, resize_image
 from ..utils import get_mask_ellipse_diameters
-from .core import io, series
+from cellpose.app_core import series
 from .ui import menus
+from .ui.dialogs import TrainWindow, prompt_series_templates
 from .model import InstanceClasses, MainModel, SegmentationParameters, SeriesState
 from .view import LabelRow, SeriesNavViewState
 from .ui.widgets import brush_cursor, select_cursor
@@ -992,7 +994,7 @@ class MainPresenter:
         self.refresh_plot()
 
     def save_sets(self) -> None:
-        from cellpose.gui.core.session import write_session
+        from cellpose.app_core import write_session
 
         filename = self.output_filename(str(self.model.filename))
         base = os.path.splitext(filename)[0]
@@ -1014,8 +1016,6 @@ class MainPresenter:
             print(f"ERROR: {e}")
 
     def train_new_model(self) -> None:
-        from .ui.dialogs import TrainWindow
-
         current_train_data_folder = self.training_params().get("train_data_folder", "")
         if not current_train_data_folder:
             current_train_data_folder = (
@@ -1041,7 +1041,7 @@ class MainPresenter:
                     train_files,
                     restore,
                     normalize_params,
-                ) = io._get_train_set(
+                ) = get_train_set(
                     get_image_files(current_train_data_folder, "_masks", look_one_level_down=True)
                 )
             except ValueError as e:
@@ -1060,7 +1060,7 @@ class MainPresenter:
                     train_files,
                     restore,
                     normalize_params,
-                ) = io._get_train_set(
+                ) = get_train_set(
                     get_image_files(train_data_folder, "_masks", look_one_level_down=True)
                 )
             except ValueError as e:
@@ -1260,8 +1260,18 @@ class MainPresenter:
 
     # ---- IO ----
 
+    def _custom_model_dir(self):
+        custom_dir = MODEL_DIR.joinpath("custom")
+        custom_dir.mkdir(parents=True, exist_ok=True)
+        return custom_dir
+
+    def _write_model_list(self, model_strings) -> None:
+        with open(MODEL_LIST_PATH, "w") as textfile:
+            for model_string in model_strings:
+                textfile.write(model_string + "\n")
+
     def init_model_list(self) -> None:
-        io._get_custom_model_dir()
+        self._custom_model_dir()
         self.model.model_strings = get_user_models()
         self.view.set_model_list(self.model.model_strings)
 
@@ -1297,7 +1307,7 @@ class MainPresenter:
         image=None,
         image_file=None,
     ) -> None:
-        from cellpose.gui.core.session import read_session
+        from cellpose.app_core import read_session
 
         if not filename:
             return
@@ -1387,7 +1397,7 @@ class MainPresenter:
         if folder == "":
             return
 
-        templates = io._prompt_series_templates(
+        templates = prompt_series_templates(
             self.view,
             folder,
             self.model.last_series_subfolder_template,
@@ -1443,7 +1453,7 @@ class MainPresenter:
             return
 
         fname = os.path.split(filename)[-1]
-        target = io._get_custom_model_dir().joinpath(fname)
+        target = self._custom_model_dir().joinpath(fname)
         try:
             shutil.copyfile(filename, os.fspath(target))
         except shutil.SameFileError:
@@ -1457,7 +1467,7 @@ class MainPresenter:
                 break
         model_strings.append(fname)
         self.model.model_strings = model_strings
-        io._write_model_list(model_strings)
+        self._write_model_list(model_strings)
         self.view.set_model_list(model_strings, current=fname)
         if load_model:
             self.model_choose(custom=True)
@@ -1471,8 +1481,8 @@ class MainPresenter:
             model_strings = list(self.model.model_strings)
             del model_strings[ind]
             self.model.model_strings = model_strings
-            io._write_model_list(model_strings)
-            model_path = io._get_custom_model_dir().joinpath(modelstr)
+            self._write_model_list(model_strings)
+            model_path = self._custom_model_dir().joinpath(modelstr)
             if model_path.exists():
                 os.remove(os.fspath(model_path))
             if model_strings:

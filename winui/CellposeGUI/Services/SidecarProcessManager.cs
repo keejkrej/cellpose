@@ -51,7 +51,7 @@ public sealed class SidecarProcessManager
             StartInfo = new ProcessStartInfo
             {
                 FileName = uvPath,
-                Arguments = $"run python -m cellpose.gui.api --host 127.0.0.1 --port {port}",
+                Arguments = $"run python -m cellpose.api --host 127.0.0.1 --port {port}",
                 WorkingDirectory = RepoRoot,
                 UseShellExecute = false,
                 CreateNoWindow = true,
@@ -113,7 +113,7 @@ public sealed class SidecarProcessManager
 
         var stderrTail = _stderr.ToString().Trim();
         SetStatus(string.IsNullOrWhiteSpace(stderrTail)
-            ? "Sidecar failed to start. Run `uv run python -m cellpose.gui.api` manually to see errors."
+            ? "Sidecar failed to start. Run `uv run python -m cellpose.api` manually to see errors."
             : $"Sidecar failed to start: {stderrTail}");
     }
 

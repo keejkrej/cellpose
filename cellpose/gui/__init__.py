@@ -3,7 +3,7 @@
 from .app import run
 from .model import MainModel
 from .presenter import MainPresenter
-from .view import LabelRow, MainView, MainViewProtocol, MainW, SeriesNavViewState
+from .view import LabelRow, MainView, MainViewProtocol, SeriesNavViewState
 
 __all__ = [
     "LabelRow",
@@ -11,7 +11,6 @@ __all__ = [
     "MainPresenter",
     "MainView",
     "MainViewProtocol",
-    "MainW",
     "SeriesNavViewState",
     "run",
 ]

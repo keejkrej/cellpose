@@ -7,7 +7,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from cellpose.gui.core.session import (
+from cellpose.app_core import (
     SessionData,
     default_session_path,
     read_session,

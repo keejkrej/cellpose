@@ -12,7 +12,7 @@ from cellpose.io import imread_2D
 from ..arrays import decode_array, encode_array, encode_optional
 from ..schemas import InferRequest, InferResponse, RecomputeFlowsRequest, RecomputeResponse
 from ..segmentation import recompute_from_flows, run_inference
-from cellpose.gui.core.mask_ops import normalize_mask_dtype, renumber_masks
+from cellpose.app_core.mask_ops import normalize_mask_dtype, renumber_masks
 
 router = APIRouter(tags=["infer"])
 

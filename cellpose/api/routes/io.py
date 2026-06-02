@@ -8,7 +8,7 @@ import numpy as np
 
 from fastapi import APIRouter, HTTPException
 
-from cellpose.gui.core.session import (
+from cellpose.app_core import (
     SegmentationMetadata,
     SessionData,
     default_session_path,

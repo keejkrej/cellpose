@@ -16,7 +16,7 @@ from typing import Any, Protocol
 
 import numpy as np
 
-from .core.qt import QtCore, QtGui
+from .qt import QtCore, QtGui
 from qtpy.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
@@ -41,7 +41,7 @@ import pyqtgraph as pg
 from pyqtgraph.parametertree import Parameter, ParameterTree
 
 from .. import version
-from .core import series
+from cellpose.app_core import series
 from .model import SegmentationParameters, SeriesState
 from .ui.widgets import (
     CheckBoxHeader,
@@ -1058,6 +1058,3 @@ class MainView(QMainWindow):
                     self.rect_select_release.emit(pos, event.modifiers())
                 return True
         return super().eventFilter(obj, event)
-
-
-MainW = MainView

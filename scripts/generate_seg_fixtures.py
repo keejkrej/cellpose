@@ -6,7 +6,7 @@ from pathlib import Path
 
 import numpy as np
 
-from cellpose.gui.core.session import SessionData, session_to_pickle_dict, write_session
+from cellpose.app_core import SessionData, session_to_pickle_dict, write_session
 
 FIXTURES = Path(__file__).resolve().parents[1] / "tests" / "fixtures" / "seg_npy"
 

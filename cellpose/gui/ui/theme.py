@@ -13,7 +13,7 @@ import subprocess
 import sys
 from collections.abc import Callable
 
-from ..core.qt import QtCore, QtGui
+from ..qt import QtCore, QtGui
 from qtpy.QtWidgets import QApplication
 
 

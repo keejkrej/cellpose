@@ -4,7 +4,7 @@ Custom graphics widgets for the Cellpose GUI view layer.
 
 import numpy as np
 
-from ..core.qt import QtCore, QtGui
+from ..qt import QtCore, QtGui
 from qtpy.QtWidgets import (
     QCheckBox,
     QFrame,

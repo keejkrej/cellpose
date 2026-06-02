@@ -1,4 +1,4 @@
-"""Shared mask pixel operations for desktop GUI and sidecar."""
+"""Shared mask pixel operations for the Qt GUI and HTTP API."""
 
 from __future__ import annotations
 

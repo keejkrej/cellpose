@@ -8,7 +8,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, HTTPException
 
-from cellpose.gui.core import io as gui_io
+from cellpose.app_core.train import get_train_set
 from cellpose.models import MODEL_DIR, MODEL_LIST_PATH, get_user_models
 from cellpose.train import train_seg
 
@@ -31,7 +31,7 @@ def train(request: TrainRequest) -> dict:
             if name.lower().endswith((".tif", ".tiff", ".png", ".jpg", ".jpeg"))
         ]
     )
-    train_data, train_labels, train_files, _, _ = gui_io._get_train_set(image_names)
+    train_data, train_labels, train_files, _, _ = get_train_set(image_names)
     if len(train_data) == 0:
         raise HTTPException(
             status_code=400,

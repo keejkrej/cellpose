@@ -12,7 +12,7 @@ import pathlib
 import sys
 import warnings
 
-from .core.qt import QtCore, QtGui
+from .qt import QtCore, QtGui
 from qtpy.QtWidgets import QApplication
 
 from .. import models
