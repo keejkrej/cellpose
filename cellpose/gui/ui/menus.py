@@ -9,7 +9,7 @@ def mainmenu(view, presenter):
     main_menu = view.menuBar()
     file_menu = main_menu.addMenu("&File")
     loadImg = QAction("&Load image", view)
-    loadImg.triggered.connect(presenter.load_image)
+    loadImg.triggered.connect(lambda: presenter.load_image())
     file_menu.addAction(loadImg)
 
     loadFolderPattern = QAction("Load &folder", view)
@@ -54,7 +54,7 @@ def modelmenu(view, presenter):
     main_menu = view.menuBar()
     model_menu = main_menu.addMenu("&Models")
     view.addmodel = QAction("Add custom torch model to GUI", view)
-    view.addmodel.triggered.connect(presenter.add_model)
+    view.addmodel.triggered.connect(lambda: presenter.add_model())
     view.addmodel.setEnabled(True)
     model_menu.addAction(view.addmodel)
 
