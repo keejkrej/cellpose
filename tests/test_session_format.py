@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import numpy as np
@@ -55,6 +56,59 @@ def test_roundtrip(tmp_path):
 
 def test_default_session_path():
     assert default_session_path("/data/cells.tif") == "/data/cells_seg.npy"
+
+
+def test_resolve_ignores_absolute_stored_path(tmp_path):
+    masks = np.array([[0, 1, 1], [0, 2, 2]], dtype=np.uint16)
+    image_path = tmp_path / "img.jpg"
+    image_path.write_bytes(b"\xff\xd8\xff")
+    dat = {
+        "outlines": masks.copy(),
+        "masks": masks,
+        "filename": "/home/jack/data/rcc_jb4/Pos27/img.jpg",
+        "flows": [],
+    }
+    seg_path = tmp_path / "img_seg.npy"
+    np.save(seg_path, dat)
+
+    loaded = read_session(seg_path)
+    assert loaded.source_image == str(image_path.resolve())
+    assert "/home/jack" not in loaded.source_image
+
+
+def test_resolve_stem_extension_fallback(tmp_path):
+    masks = np.array([[0, 1]], dtype=np.uint16)
+    image_path = tmp_path / "img_000000000_Durchlicht_000.jpg"
+    image_path.write_bytes(b"\xff\xd8\xff")
+    dat = {
+        "outlines": masks.copy(),
+        "masks": masks,
+        "filename": "/other/machine/wrong_name.jpg",
+        "flows": [],
+    }
+    seg_path = tmp_path / "img_000000000_Durchlicht_000_seg.npy"
+    np.save(seg_path, dat)
+
+    loaded = read_session(seg_path)
+    assert loaded.source_image == str(image_path.resolve())
+    assert os.path.isfile(loaded.source_image)
+
+
+def test_resolve_empty_filename_uses_stem(tmp_path):
+    masks = np.array([[0, 1]], dtype=np.uint16)
+    image_path = tmp_path / "cells.tif"
+    image_path.write_bytes(b"II*\x00\x08\x00\x00\x00")
+    dat = {
+        "outlines": masks.copy(),
+        "masks": masks,
+        "filename": "",
+        "flows": [],
+    }
+    seg_path = tmp_path / "cells_seg.npy"
+    np.save(seg_path, dat)
+
+    loaded = read_session(seg_path)
+    assert loaded.source_image == str(image_path.resolve())
 
 
 def test_read_legacy_pickle_dict(tmp_path):

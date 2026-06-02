@@ -128,11 +128,42 @@ public sealed class CellposeSessionStore
         throw new SidecarException("Invalid mask shape in _seg.npy");
     }
 
+    private static readonly string[] SourceImageExtensions =
+        [".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp"];
+
     private static string ResolveSourceImage(string sourceImage, string sessionPath)
     {
-        if (Path.IsPathRooted(sourceImage))
-            return sourceImage;
-        return Path.GetFullPath(Path.Combine(Path.GetDirectoryName(sessionPath)!, sourceImage));
+        var segDir = Path.GetDirectoryName(sessionPath)!;
+        var stored = sourceImage.Trim();
+        var stem = SessionStem(sessionPath);
+
+        if (stored.Length > 0)
+        {
+            var basename = Path.GetFileName(stored);
+            var candidate = Path.Combine(segDir, basename);
+            if (File.Exists(candidate))
+                return Path.GetFullPath(candidate);
+        }
+
+        foreach (var ext in SourceImageExtensions)
+        {
+            var candidate = Path.Combine(segDir, stem + ext);
+            if (File.Exists(candidate))
+                return Path.GetFullPath(candidate);
+        }
+
+        if (stored.Length > 0)
+            return Path.GetFullPath(Path.Combine(segDir, Path.GetFileName(stored)));
+        return Path.GetFullPath(Path.Combine(segDir, stem));
+    }
+
+    private static string SessionStem(string sessionPath)
+    {
+        var name = Path.GetFileName(sessionPath);
+        const string suffix = "_seg.npy";
+        if (name.EndsWith(suffix, StringComparison.OrdinalIgnoreCase))
+            return name[..^suffix.Length];
+        return Path.GetFileNameWithoutExtension(name).Replace("_seg", "");
     }
 
     private static string GetString(Dictionary<string, object?> payload, string key) =>

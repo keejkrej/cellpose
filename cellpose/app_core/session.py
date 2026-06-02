@@ -77,10 +77,47 @@ def _compute_outlines(masks: np.ndarray) -> np.ndarray:
     return masks * masks_to_outlines(masks)
 
 
-def _resolve_source_image(filename: str, session_path: Path) -> str:
-    if os.path.isabs(filename):
-        return filename
-    return str((session_path.parent / filename).resolve())
+_SOURCE_IMAGE_EXTENSIONS = (".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp")
+
+
+def _session_stem(session_path: Path) -> str:
+    stem = session_path.name.removesuffix("_seg.npy")
+    if stem == session_path.name:
+        stem = session_path.stem.replace("_seg", "")
+    return stem
+
+
+def _resolve_source_image(stored: str, session_path: Path) -> str:
+    """Resolve the source image path for a ``_seg.npy`` file beside the session.
+
+    The pickled ``filename`` field is not opened as a full path; only its basename
+    is combined with the session directory. Falls back to ``<stem>.<ext>`` candidates.
+    """
+    seg_dir = session_path.parent
+    stored = stored.strip()
+
+    if stored:
+        candidate = seg_dir / os.path.basename(stored)
+        if candidate.is_file():
+            return str(candidate.resolve())
+
+    stem = _session_stem(session_path)
+    for ext in _SOURCE_IMAGE_EXTENSIONS:
+        candidate = seg_dir / (stem + ext)
+        if candidate.is_file():
+            return str(candidate.resolve())
+
+    if stored:
+        return str((seg_dir / os.path.basename(stored)).resolve())
+    return str((seg_dir / stem).resolve())
+
+
+def resolve_source_image_path(
+    session_path: str | os.PathLike[str],
+    stored: str,
+) -> str:
+    """Public resolver for scripts; same rules as :func:`read_session`."""
+    return _resolve_source_image(str(stored or ""), Path(session_path))
 
 
 def session_to_pickle_dict(session: SessionData) -> dict[str, Any]:
@@ -126,11 +163,7 @@ def session_from_pickle_dict(dat: dict[str, Any], session_path: Path) -> Session
         raise ValueError("Invalid _seg.npy file: missing outlines")
 
     masks = np.asarray(dat["masks"]).squeeze()
-    filename = str(dat.get("filename", ""))
-    if filename:
-        source_image = _resolve_source_image(filename, session_path)
-    else:
-        source_image = str(session_path.with_name(session_path.stem.replace("_seg", "")))
+    source_image = _resolve_source_image(str(dat.get("filename", "") or ""), session_path)
 
     flows = None
     if "flows" in dat and dat["flows"] is not None:
@@ -209,6 +242,7 @@ __all__ = [
     "SessionData",
     "default_session_path",
     "read_session",
+    "resolve_source_image_path",
     "session_from_pickle_dict",
     "session_to_pickle_dict",
     "write_session",

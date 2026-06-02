@@ -6,6 +6,7 @@ from pathlib import Path
 
 import numpy as np
 
+from cellpose.app_core.session import resolve_source_image_path
 from cellpose.plot import image_to_rgb
 from cellpose.utils import get_mask_ellipse_diameters, get_mask_pixel_cv
 
@@ -29,27 +30,12 @@ def resolve_image_path(seg_path: Path, session_source: str, image_arg: str | Non
             raise FileNotFoundError(f"Image not found: {path}")
         return path
 
-    candidates = []
-    if session_source:
-        candidates.append(Path(session_source))
-    stem = seg_path.name.removesuffix("_seg.npy")
-    for ext in (".jpg", ".jpeg", ".png", ".tif", ".tiff"):
-        candidates.append(seg_path.with_name(stem + ext))
-
-    seen: set[Path] = set()
-    for candidate in candidates:
-        if candidate in seen:
-            continue
-        seen.add(candidate)
-        if candidate.is_file():
-            return candidate
-        alt = Path(str(candidate).replace("/home/jack/", "/Users/jack/"))
-        if alt.is_file():
-            return alt
-
-    raise FileNotFoundError(
-        "Could not find source image. Pass --image explicitly."
-    )
+    path = Path(resolve_source_image_path(seg_path, session_source))
+    if not path.is_file():
+        raise FileNotFoundError(
+            "Could not find source image. Pass --image explicitly."
+        )
+    return path
 
 
 def per_cell_size_aspect(masks: np.ndarray) -> tuple[np.ndarray, np.ndarray]:

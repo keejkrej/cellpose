@@ -39,11 +39,8 @@ final class CellposeSessionStore {
 
     func load(path: String, imageLoader: ImageLoaderService) throws -> LoadedSession {
         let payload = try SegNpyIO.read(path: path)
-        var sourceImage = payload["filename"] as? String ?? ""
-        if !sourceImage.hasPrefix("/") {
-            sourceImage = URL(fileURLWithPath: path).deletingLastPathComponent()
-                .appendingPathComponent(sourceImage).path
-        }
+        let stored = payload["filename"] as? String ?? ""
+        let sourceImage = resolveSourceImage(stored: stored, sessionPath: path)
         guard FileManager.default.fileExists(atPath: sourceImage) else {
             throw SidecarError.serverError("Source image not found: \(sourceImage)")
         }
@@ -52,6 +49,43 @@ final class CellposeSessionStore {
             imagePath: sourceImage,
             image: try imageLoader.load(path: sourceImage)
         )
+    }
+
+    private func resolveSourceImage(stored: String, sessionPath: String) -> String {
+        let sessionURL = URL(fileURLWithPath: sessionPath)
+        let segDir = sessionURL.deletingLastPathComponent()
+        let stem = sessionStem(sessionURL)
+        let trimmed = stored.trimmingCharacters(in: .whitespacesAndNewlines)
+        let extensions = [".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp"]
+
+        if !trimmed.isEmpty {
+            let basename = URL(fileURLWithPath: trimmed).lastPathComponent
+            let candidate = segDir.appendingPathComponent(basename)
+            if FileManager.default.fileExists(atPath: candidate.path) {
+                return candidate.path
+            }
+        }
+
+        for ext in extensions {
+            let candidate = segDir.appendingPathComponent(stem + ext)
+            if FileManager.default.fileExists(atPath: candidate.path) {
+                return candidate.path
+            }
+        }
+
+        if !trimmed.isEmpty {
+            return segDir.appendingPathComponent(URL(fileURLWithPath: trimmed).lastPathComponent).path
+        }
+        return segDir.appendingPathComponent(stem).path
+    }
+
+    private func sessionStem(_ sessionURL: URL) -> String {
+        let name = sessionURL.lastPathComponent
+        let suffix = "_seg.npy"
+        if name.hasSuffix(suffix) {
+            return String(name.dropLast(suffix.count))
+        }
+        return sessionURL.deletingPathExtension().lastPathComponent.replacingOccurrences(of: "_seg", with: "")
     }
 
     func loadCompanion(sessionPath: String, imagePath: String, image: ImageData) throws -> LoadedSession {
